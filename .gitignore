@@ -4,3 +4,6 @@ node_modules
 *.log
 .env
 .DS_Store
+uploads/
+.next/static/webpack
+.next/trace
