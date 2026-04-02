@@ -165,7 +165,7 @@ class Handler(BaseHTTPRequestHandler):
         if not txt: return {"success": False, "error": "No text"}
         prompt = f'''你是一个专业的法律信息提取系统。从以下判决书中提取关键信息，返回纯JSON格式：
 
-{{"案号":"判决书案号","案由":"案由","原告":"原告全称","被告":"被告全称","判决法院":"一审法院全称","判决结果":"一审判决结果的核心内容（1-2句话）","上诉期限":"几天","上诉法院":"上诉法院全称"}}
+{{"案号":"判决书案号","案由":"案由","原告":"原告全称","被告":"被告全称","判决法院":"一审法院全称","判决结果":"一审判决结果的核心内容（1-2句话）","判决日期":"YYYY年MM月DD日或中文数字格式","上诉期限":"几天","上诉法院":"上诉法院全称"}}
 
 判决书原文：
 {txt[:3000]}'''
@@ -229,7 +229,10 @@ class Handler(BaseHTTPRequestHandler):
 7. 只输出上诉状正文，无任何解释说明'''
 
         text = _call_ai(prompt, "直接返回民事上诉状正文，不输出任何额外说明。")
-        return {"success": True, "appeal": text}
+        import re
+        legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
+        legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
+        return {"success": True, "appeal": text, "legal_basis": legal_basis}
 
 if __name__ == "__main__":
     print(f"AI Backend ({OPENROUTER_MODEL}): http://localhost:3457", flush=True)

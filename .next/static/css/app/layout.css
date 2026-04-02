@@ -536,6 +536,9 @@ video {
 .relative {
   position: relative;
 }
+.block {
+  display: block;
+}
 .flex {
   display: flex;
 }
@@ -550,9 +553,6 @@ video {
 }
 .resize {
   resize: both;
-}
-.break-all {
-  word-break: break-all;
 }
 .border {
   border-width: 1px;

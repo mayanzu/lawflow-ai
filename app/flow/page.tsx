@@ -16,7 +16,6 @@ const STEPS = [
   { id: 'upload', title: '上传' },
   { id: 'ocr', title: 'OCR识别' },
   { id: 'analyze', title: 'AI分析' },
-  { id: 'generate', title: '生成诉状' },
 ]
 
 function sleep(ms: number) {
@@ -101,7 +100,7 @@ export default function FlowPage() {
       return
     }
 
-    // AI 分析
+    // AI 分析：自动提取案件信息
     setStepStatus(2, 'active', 10, '正在提取案件信息...')
     try {
       const analyzeRes = await callApi('/api/analyze', { text: ocrTextRef.current })
@@ -113,31 +112,12 @@ export default function FlowPage() {
     } catch (err: any) {
       if (err.message === '请求已取消') return
       setStepStatus(2, 'error', 0, err.message)
-      setError(`AI 分析失败: ${err.message}`)
+      setError(`分析失败: ${err.message}`)
       return
     }
 
-    // 生成诉状
-    setStepStatus(3, 'active', 10, '正在生成...')
-    try {
-      abortRef.current = new AbortController()
-      const timeout = setTimeout(() => abortRef.current?.abort(), 150000)
-      const genRes = await callApi('/api/generate-appeal', {
-        info: JSON.parse(localStorage.getItem('lw_analyze_info') || '{}'),
-        ocr_text: ocrTextRef.current,
-      })
-      clearTimeout(timeout)
-      if (!genRes.success) throw new Error(genRes.error || '生成失败')
-      const appealText = genRes.appeal || ''
-      localStorage.setItem('lw_appeal_text', appealText)
-      setStepStatus(3, 'done', 100, '完成')
-      await sleep(500)
-      router.push('/result')
-    } catch (err: any) {
-      if (err.name === 'AbortError' || err.message === '请求已取消') return
-      setStepStatus(3, 'error', 0, err.message)
-      setError(`生成失败: ${err.message}`)
-    }
+    await sleep(300)
+    router.push('/confirm')
   }
 
   useEffect(() => {
