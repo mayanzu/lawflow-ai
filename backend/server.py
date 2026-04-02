@@ -6,7 +6,7 @@ import json, os, sys, time, subprocess
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # 模型配置
-OPENROUTER_MODEL = 'qwen/qwen3.6-plus-preview:free'
+OPENROUTER_MODEL = 'stepfun/step-3.5-flash:free'
 OAUTH_PATH = '/root/.openclaw/agents/main/agent/auth-profiles.json'
 if os.path.exists(OAUTH_PATH):
     with open(OAUTH_PATH) as f:
@@ -26,21 +26,30 @@ def _get_ocr():
         _paddle_ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
     return _paddle_ocr
 
-def _call_ai(prompt, system=""):
+def _call_ai(prompt, system="", retries=2):
     from urllib.request import Request, urlopen
+    import time
     msgs = []
     if system: msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
     body = json.dumps({"model": OPENROUTER_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25})
-    req = Request("https://openrouter.ai/api/v1/chat/completions", data=body.encode(), method="POST")
-    req.add_header("Content-Type", "application/json")
-    req.add_header("Authorization", f"Bearer {OPENROUTER_KEY}")
-    try:
-        resp = urlopen(req, timeout=180)
-        data = json.loads(resp.read())
-        return data["choices"][0]["message"]["content"]
-    except Exception as e:
-        return f"[AI 调用失败: {e}]"
+    last_err = ""
+    for attempt in range(retries + 1):
+        req = Request("https://openrouter.ai/api/v1/chat/completions", data=body.encode(), method="POST")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Authorization", f"Bearer {OPENROUTER_KEY}")
+        try:
+            resp = urlopen(req, timeout=180)
+            data = json.loads(resp.read())
+            return data["choices"][0]["message"]["content"]
+        except Exception as e:
+            last_err = str(e)
+            if "429" in last_err and attempt < retries:
+                wait = (attempt + 1) * 5
+                time.sleep(wait)
+                continue
+            return f"[AI 调用失败: {last_err}]"
+    return f"[AI 调用失败: {last_err}]"
 
 def _ocr_pdf(path):
     import pdfplumber

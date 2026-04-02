@@ -10,7 +10,7 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const doUpload = (file: File) => {
-    Object.keys(localStorage).filter(k => k.startsWith('lw_')).forEach(k => localStorage.removeItem(k))
+    Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k))
     localStorage.setItem('lw_file_name', file.name)
     localStorage.setItem('lw_file_size', String(file.size))
     localStorage.setItem('lw_file_type', file.type)
