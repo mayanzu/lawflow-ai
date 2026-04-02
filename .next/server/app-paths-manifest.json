@@ -1,3 +1,9 @@
 {
-  "/api/generate-appeal/route": "app/api/generate-appeal/route.js"
+  "/page": "app/page.js",
+  "/api/upload/route": "app/api/upload/route.js",
+  "/flow/page": "app/flow/page.js",
+  "/api/ocr/route": "app/api/ocr/route.js",
+  "/api/analyze/route": "app/api/analyze/route.js",
+  "/api/generate-appeal/route": "app/api/generate-appeal/route.js",
+  "/result/page": "app/result/page.js"
 }
