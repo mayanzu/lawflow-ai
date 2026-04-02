@@ -1,0 +1,97 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-primary: #FFFFFF;
+    --bg-secondary: #F5F5F7;
+    --bg-card: #FFFFFF;
+    --text-primary: #1D1D1F;
+    --text-secondary: #6E6E73;
+    --text-tertiary: #86868B;
+    --border: #E8E8ED;
+    --accent: #0071E3;
+    --accent-hover: #0077ED;
+    --success: #0071E3;
+    --shadow: 0 2px 12px rgba(0,0,0,0.08);
+    --shadow-hover: 0 8px 30px rgba(0,0,0,0.12);
+  }
+
+  .dark {
+    --bg-primary: #000000;
+    --bg-secondary: #1C1C1E;
+    --bg-card: #2C2C2E;
+    --text-primary: #F5F5F7;
+    --text-secondary: #A1A1A6;
+    --text-tertiary: #636366;
+    --border: #38383A;
+    --accent: #0A84FF;
+    --accent-hover: #409CFF;
+    --success: #0A84FF;
+    --shadow: 0 2px 12px rgba(0,0,0,0.3);
+    --shadow-hover: 0 8px 30px rgba(0,0,0,0.4);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Helvetica Neue", sans-serif;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    line-height: 1.5;
+  }
+}
+
+@layer components {
+  .glass-card {
+    background: var(--bg-card);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .glass-card:hover {
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-2px);
+  }
+
+  .apple-btn {
+    background: var(--accent);
+    color: #FFFFFF;
+    border: none;
+    border-radius: 980px;
+    padding: 14px 32px;
+    font-size: 17px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: -0.01em;
+  }
+  .apple-btn:hover {
+    background: var(--accent-hover);
+    transform: scale(1.02);
+  }
+  .apple-btn:active { transform: scale(0.98); }
+
+  .apple-btn-secondary {
+    background: var(--bg-secondary);
+    color: var(--accent);
+    border: none;
+    border-radius: 980px;
+    padding: 14px 32px;
+    font-size: 17px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .apple-btn-secondary:hover { background: var(--border); }
+
+  .fade-in {
+    animation: fadeIn 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
