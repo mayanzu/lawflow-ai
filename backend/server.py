@@ -2,11 +2,11 @@
 诉状助手 - AI 后端服务（qwen 模型）
 真实 PaddleOCR + AI 分析 + 上诉状生成
 """
-import json, os, sys, time, subprocess
+import json, os, sys, time, subprocess, socketserver, http.client
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # 模型配置
-OPENROUTER_MODEL = 'stepfun/step-3.5-flash:free'
+OPENROUTER_MODEL = 'qwen/qwen3.6-plus:free'
 OAUTH_PATH = '/root/.openclaw/agents/main/agent/auth-profiles.json'
 if os.path.exists(OAUTH_PATH):
     with open(OAUTH_PATH) as f:
@@ -18,6 +18,18 @@ else:
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# 上传文件7天自动清理
+def _cleanup_old_uploads(days=7):
+    try:
+        cutoff = time.time() - days * 86400
+        for f in os.listdir(UPLOAD_DIR):
+            p = os.path.join(UPLOAD_DIR, f)
+            if os.path.isfile(p) and os.stat(p).st_mtime < cutoff:
+                os.remove(p)
+    except Exception:
+        pass
+
+import shutil
 _paddle_ocr = None
 def _get_ocr():
     global _paddle_ocr
@@ -102,24 +114,35 @@ def _ocr_pdf(path):
     import pdfplumber
     import fitz, tempfile
     parts = []
+    tmpdir = None
     try:
         with pdfplumber.open(path) as pdf:
             for pg in pdf.pages:
                 t = pg.extract_text()
                 if t and len(t.strip()) > 10: parts.append(t)
-    except: pass
+    except Exception:
+        pass
     if parts: return "\n".join(parts)
     ocr = _get_ocr()
-    doc, tmpdir = fitz.open(path), tempfile.mkdtemp()
-    for i in range(min(len(doc), 30)):
-        pix = doc[i].get_pixmap(matrix=fitz.Matrix(2, 2))
-        p = os.path.join(tmpdir, f"p{i}.png"); pix.save(p)
-        res = ocr.ocr(p, cls=True)
-        for line in res:
-            if line:
-                for w in line: parts.append(w[1][0])
-        os.remove(p)
-    doc.close()
+    doc = None
+    tmpdir = tempfile.mkdtemp()
+    try:
+        doc = fitz.open(path)
+        for i in range(min(len(doc), 30)):
+            pix = doc[i].get_pixmap(matrix=fitz.Matrix(2, 2))
+            p = os.path.join(tmpdir, f"p{i}.png")
+            pix.save(p)
+            res = ocr.ocr(p, cls=True)
+            for line in res:
+                if line:
+                    for w in line:
+                        parts.append(w[1][0])
+            os.remove(p)
+    finally:
+        if doc:
+            doc.close()
+        if tmpdir:
+            shutil.rmtree(tmpdir)
     return "\n".join(parts)
 
 def _ocr_image(path):
@@ -130,11 +153,13 @@ def _ocr_image(path):
             for w in line: parts.append(w[1][0])
     return "\n".join(parts)
 
-class ThreadedHandler(http.server.BaseHTTPRequestHandler):
+class ThreadedHandler(BaseHTTPRequestHandler):
     daemon_threads = True
+    timeout = 60  # 请求超时60秒
+    max_empty_requests = 3
     def log_message(self, *args): pass  # 关闭日志
 
-class ThreadedTCPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+class ThreadedTCPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
@@ -150,13 +175,26 @@ class Handler(ThreadedHandler):
         self.end_headers()
 
     def do_POST(self):
+        # 每次请求清理7天前上传的文件
+        _cleanup_old_uploads()
         ct = self.headers.get("Content-Type", "")
         if "multipart/form-data" in ct:
-            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            n = int(self.headers.get("Content-Length", 0))
+            if n > 50 * 1024 * 1024:  # 限制50MB
+                self.send_error(413, "Request body too large")
+                return
+            raw = self.rfile.read(n)
             res = self._upload_file(raw, ct)
         else:
             n = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(n)) if n else {}
+            if n > 10 * 1024 * 1024:  # JSON body 限制10MB
+                self.send_error(413, "Request body too large")
+                return
+            try:
+                body = json.loads(self.rfile.read(n)) if n else {}
+            except json.JSONDecodeError as e:
+                self.send_error(400, f"Invalid JSON: {e}")
+                return
             p = self.path.split("?")[0]
             if p == "/ocr": res = self._ocr(body)
             elif p == "/analyze": res = self._analyze(body)
@@ -309,31 +347,55 @@ class Handler(ThreadedHandler):
         ocr_text = body.get("ocr_text", "")
         firm = "安徽国恒律师事务所"
         attorney = "赵光辉"
+        stream_done = threading.Event()
+        stream_timed_out = False
 
         def send_sse(data_dict):
             """发送 SSE 事件"""
             try:
                 self.wfile.write(f"data: {json.dumps(data_dict, ensure_ascii=False)}\n\n".encode())
                 self.wfile.flush()
-            except Exception:
-                pass
+            except BrokenPipeError:
+                raise Exception("客户端已断开连接")
+            except Exception as e:
+                import sys
+                print(f"[SSE send error] {e}", flush=True, file=sys.stderr)
 
         def on_chunk(chunk):
+            if stream_timed_out:
+                return
             full_text.append(chunk)
-            send_sse({"type": "chunk", "content": chunk})
+            try:
+                send_sse({"type": "chunk", "content": chunk})
+            except Exception:
+                pass
 
         full_text = []
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
+            self.send_header("Connection", "keep-alive")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
             # 生成 prompt（简化）
             prompt = f"请根据以下信息生成一份民事上诉状：{json.dumps(info, ensure_ascii=False)}，判决书内容：{ocr_text[:1000]}"
-            _call_ai_stream(prompt, retries=2, callback=on_chunk)
+
+            # 流式调用，带120秒超时
+            def stream_task():
+                try:
+                    _call_ai_stream(prompt, retries=2, callback=on_chunk)
+                finally:
+                    stream_done.set()
+
+            t = threading.Thread(target=stream_task)
+            t.daemon = True
+            t.start()
+            if not stream_done.wait(120):  # 120秒超时
+                stream_timed_out = True
+                send_sse({"type": "error", "error": "生成超时（120秒）"})
+                return
 
             # 提取法律依据
             text_so_far = "".join(full_text)
@@ -399,61 +461,6 @@ class Handler(ThreadedHandler):
         legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
         return {"success": True, "appeal": text, "legal_basis": legal_basis}
 
-        info = body.get("info", {})
-        ocr_text = body.get("ocr_text", "")
-        firm = "安徽国恒律师事务所"
-        attorney = "赵光辉"
-
-        # 自动判定立场：从判决书原文中查找安徽国恒律师事务所/赵光辉的位置
-        position = "上诉人"
-        if ocr_text:
-            # 寻找律所/律师名称的上下文，判断是代表原告还是被告
-            idx1 = ocr_text.find(firm)
-            idx2 = ocr_text.find(attorney)
-            start = max(idx1, idx2) - 200 if max(idx1, idx2) >= 0 else 0
-            if start < 0: start = 0
-            context = ocr_text[start:start+300]
-            # 判断：律师在原告段还是被告段
-            is_def = "被告" in context and "被告"[:3] not in ["上诉人"]
-            if idx1 >= 0 or idx2 >= 0:
-                # 如果律所/律师名称在被告段之前出现，说明被告是我们的客户——被告方上诉
-                client_side = "上诉人（原审被告）" if "被告" in context or "被上诉人" not in context else "上诉人（原审原告）"
-            else:
-                client_side = "上诉人"
-        else:
-            client_side = "上诉人"
-
-        prompt = f'''你是安徽国恒律师事务所的资深诉讼律师{attorney}，专注民商事诉讼二十年。
-
-请根据以下判决书信息，撰写一份完整的、可直接提交人民法院的《民事上诉状》。
-
-## 案件信息
-{json.dumps(info, ensure_ascii=False, indent=2)}
-
-## 判决书原文
-{ocr_text[:4000]}
-
-## 写作要求（极其重要）
-1. 当事人：上诉人为我方客户{firm}委托{attorney}律师代理，当事人信息必须填写判决书中的全称，不得使用占位符
-2. 格式严格遵循《民事诉讼法》标准民事上诉状格式
-3. 上诉请求列明2-3项，如：①依法撤销XX人民法院XX号判决；②依法改判...
-4. 事实与理由部分至少分三点，每点含具体事实、法律依据（准确引用法律条文号和条文名称）、结论
-5. 结尾格式：
-   此致
-   [上诉法院全称]
-   上诉人：（原告全称）
-   委托代理人：{firm} {attorney} 律师
-   202X年X月X日
-   附：本上诉状副本X份
-6. 所有名称、案号、金额、日期必须与判决书完全一致
-7. 只输出上诉状正文，无任何解释说明'''
-
-        text = _call_ai(prompt, "直接返回民事上诉状正文，不输出任何额外说明。")
-        import re
-        legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
-        legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
-        return {"success": True, "appeal": text, "legal_basis": legal_basis}
-
 if __name__ == "__main__":
     print(f"AI Backend ({OPENROUTER_MODEL}): http://localhost:3457", flush=True)
-    HTTPServer(("0.0.0.0", 3457), Handler).serve_forever()
+    ThreadedTCPServer(("0.0.0.0", 3457), Handler).serve_forever()
