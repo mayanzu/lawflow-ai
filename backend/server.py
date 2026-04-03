@@ -439,6 +439,25 @@ class Handler(ThreadedHandler):
         stream_done = threading.Event()
         stream_timed_out = False
 
+        # 使用与 _generate 相同的强化 prompt
+        prompt = f'''你是一名资深诉讼律师。请根据以下信息直接输出民事上诉状正文纯文本。
+
+## 案件信息
+{json.dumps(info, ensure_ascii=False, indent=2)}
+
+## 判决书原文
+{ocr_text[:3000]}
+
+## 【绝对禁止】
+❌ 禁止任何Markdown符号（** **、# 号、---）
+❌ 禁止任何前言说明（如"这是一份..."）
+❌ 禁止任何后缀提示（如"使用提示"、"注意事项"）
+❌ 禁止emoji
+❌ 禁止占位符
+
+## 【开始输出】
+从"民事上诉状"五个字开始，直接输出正文。'''
+
         def send_sse(data_dict):
             try:
                 self.wfile.write(f"data: {json.dumps(data_dict, ensure_ascii=False)}\n\n".encode())
@@ -466,8 +485,6 @@ class Handler(ThreadedHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
-            prompt = f"请根据以下信息生成一份民事上诉状：{json.dumps(info, ensure_ascii=False)}，判决书内容：{ocr_text[:1000]}"
-
             def stream_task():
                 try:
                     _call_ai_stream(prompt, retries=2, callback=on_chunk)
@@ -483,9 +500,11 @@ class Handler(ThreadedHandler):
                 return
 
             text_so_far = "".join(full_text)
-            legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text_so_far)
+            # 后处理清理
+            cleaned = self._clean_appeal_text(text_so_far, info)
+            legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", cleaned)
             legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
-            send_sse({"type": "done", "appeal": text_so_far, "legal_basis": legal_basis})
+            send_sse({"type": "done", "appeal": cleaned, "legal_basis": legal_basis})
 
         except Exception as e:
             try:
@@ -525,26 +544,101 @@ class Handler(ThreadedHandler):
 ## 判决书原文
 {ocr_text[:4000]}
 
-## 写作要求（极其重要）
-1. 当事人：上诉人为我方客户{firm}委托{attorney}律师代理，当事人信息必须填写判决书中的全称，不得使用占位符
-2. 格式严格遵循《民事诉讼法》标准民事上诉状格式
-3. 上诉请求列明2-3项，如：①依法撤销XX人民法院XX号判决；②依法改判...
-4. 事实与理由部分至少分三点，每点含具体事实、法律依据（准确引用法律条文号和条文名称）、结论
-5. 结尾格式：
+## 写作要求（极其重要，违反任何一条都会导致文书报废）
+【禁止事项】
+❌ 禁止使用任何Markdown符号（** **、# 号、---等）
+❌ 禁止输出任何前言/说明/提示（如"这是一份..."、"使用提示"等）
+❌ 禁止输出任何后缀/总结/注释
+❌ 禁止使用emoji表情
+❌ 禁止使用占位符（如XXX、XX等），当事人名称、金额、日期必须与判决书完全一致
+
+【输出要求】
+✅ 直接输出民事上诉状正文，从标题"民事上诉状"开始，到附项结束
+✅ 标准法律文书格式，纯文本，不用任何标记符号
+✅ 当事人：上诉人为我方客户{firm}委托{attorney}律师代理
+✅ 上诉请求列明2-3项
+✅ 事实与理由部分至少分三点，每点含具体事实、法律依据（准确引用法律条文号和条文名称）、结论
+✅ 结尾格式：
    此致
    [上诉法院全称]
-   上诉人：（原告全称）
+   上诉人：[上诉人全称]
    委托代理人：{firm} {attorney} 律师
-   202X年X月X日
-   附：本上诉状副本X份
-6. 所有名称、案号、金额、日期必须与判决书完全一致
-7. 只输出上诉状正文，无任何解释说明'''
+   判决日期之日起十五日内提交
 
-        text = _call_ai(prompt, "直接返回民事上诉状正文，不输出任何额外说明。")
+只输出文书正文，多一个字都不要。'''
+
+        text = _call_ai(prompt, "你是文书写作AI。不要任何前言后语，直接输出民事上诉状正文纯文本，不含Markdown。")
+        
+        # 后处理：清理 AI 废话和 Markdown
+        text = self._clean_appeal_text(text, info)
+        
         import re
         legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
         legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
         return {"success": True, "appeal": text, "legal_basis": legal_basis}
+    
+    def _clean_appeal_text(self, text, info):
+        """清理 AI 输出的废话和 Markdown 符号"""
+        import re
+        
+        # 1. 删除开头的废话（AI 常见的"这是一份..."开头）
+        # 找到真正的开头（以 民事上诉状 开头）
+        title_match = re.search(r'[#= ]*民事上诉状[#= ]*\n', text)
+        if title_match:
+            text = text[title_match.start():]
+        
+        # 2. 截断到结尾（删除 AI 的"使用提示"等后缀）
+        stop_kwds = ['使用提示', '注意事项', '温馨提示', '注：', '📝', '💡', '请根据', '📄']
+        stop_pos = len(text)
+        for kw in stop_kwds:
+            pos = text.find(kw)
+            if pos > 0 and pos < stop_pos:
+                # 找到这个位置之前的一段
+                stop_pos = pos
+        
+        # 找到最后一个合理的结尾点（附：之后）
+        append_pos = text.find('附：')
+        if append_pos > 0 and append_pos < stop_pos:
+            # 找到"附："之后的最后一个句号或换行
+            end = text.rfind('\n', append_pos, stop_pos)
+            if end > append_pos:
+                stop_pos = end
+        
+        text = text[:stop_pos].strip()
+        
+        # 3. 删除 Markdown 标记
+        # 删除 ** ** 加粗标记
+        text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+        # 删除 # 标题标记
+        text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+        # 删除 --- 分割线
+        text = re.sub(r'\n---*\n', '\n', text)
+        # 删除多余的 > 引用标记
+        text = re.sub(r'^>\s*', '', text, flags=re.MULTILINE)
+        # 删除多余的 ``` 代码块标记
+        text = re.sub(r'```[^`]*```', '', text)
+        text = re.sub(r'```', '', text)
+        
+        # 4. 清理多余空行（保留最多2个连续空行）
+        text = re.sub(r'\n{4,}', '\n\n\n', text)
+        
+        # 5. 确保以"民事上诉状"开头
+        text = text.strip()
+        if not text.startswith('民事上诉状') and '民事上诉状' in text:
+            idx = text.index('民事上诉状')
+            text = text[idx:]
+        
+        # 6. 补充基本格式（如果 AI 没输出完整）
+        if not text.startswith('民事上诉状'):
+            title = '民事上诉状\n'
+            text = title + text
+        
+        # 7. 补充结尾格式（如果 AI 没输出完整）
+        if '附：' not in text and '此致' in text:
+            # 找到上诉法院后补充结尾
+            pass  # AI 通常已经输出完整
+        
+        return text
 
 if __name__ == "__main__":
     print(f"AI Backend ({OPENROUTER_MODEL}): http://localhost:3457", flush=True)
