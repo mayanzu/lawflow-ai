@@ -167,7 +167,7 @@ export default function ConfirmPage() {
                 if (data.legal_basis?.length > 0)
                   localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis))
                 setStreamDone(true)
-                setTimeout(() => router.push('/result'), 1500)
+                setGenerating(false)
                 return
               } else if (data.type === 'error') {
                 setError(data.error)
@@ -237,17 +237,27 @@ export default function ConfirmPage() {
   if (showStream) {
     return (
       <div style={{ minHeight: '100vh', background: '#F8F9FA', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-        <div style={{ padding: '12px 16px', background: '#FFF', borderBottom: '1px solid #E8EAED' }}>
+        <div style={{ padding: '12px 16px', background: '#FFF', borderBottom: '1px solid #E8EAED', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: '15px', fontWeight: 600, color: '#1D1D1F' }}>正在生成上诉状</span>
+          {!streamDone && <button
+            onClick={() => { setShowStream(false); setGenerating(false); setError('生成已取消') }}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#86868B', padding: '4px 8px', lineHeight: 1 }}
+          >×</button>}
         </div>
         <div style={{ padding: '20px 16px', maxWidth: 720, margin: '0 auto' }}>
           {error ? (
             <div style={{ background: '#FEF0EF', border: '1px solid #F5C6C5', borderRadius: 12, padding: 16 }}>
               <p style={{ color: '#D93025', fontSize: 14, marginBottom: 12 }}>{error}</p>
-              <button
-                onClick={() => { setShowStream(false); setGenerating(false); setError('') }}
-                style={{ padding: '10px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14 }}
-              >返回修改</button>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button
+                  onClick={() => { setStreamingText(''); setError(''); setStreamDone(false); handleConfirm() }}
+                  style={{ padding: '10px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14 }}
+                >重试</button>
+                <button
+                  onClick={() => { setShowStream(false); setGenerating(false); setError('') }}
+                  style={{ padding: '10px 20px', background: '#F5F5F7', color: '#1D1D1F', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14 }}
+                >返回修改</button>
+              </div>
             </div>
           ) : (
             <>
@@ -255,18 +265,24 @@ export default function ConfirmPage() {
                 {!streamDone && <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid #0071E3', borderTopColor: 'transparent', animation: 'spin 1s linear infinite', flexShrink: 0 }} />}
                 {streamDone && <div style={{ width: 16, height: 16, borderRadius: '50%', background: '#0071E3', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}><span style={{ color: '#FFF', fontSize: 10, fontWeight: 600 }}> </span></div>}
                 <span style={{ fontSize: 14, fontWeight: 600, color: streamDone ? '#0071E3' : '#1D1D1F' }}>
-                  {streamDone ? '生成完成，页面跳转中...' : 'AI 正在生成上诉状，请稍候...'}
+                  {streamDone ? '生成完成' : 'AI 正在生成上诉状...'}
                 </span>
               </div>
               <div style={{ background: '#FFF', borderRadius: 14, padding: '20px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
                 <div style={{ fontSize: 13, color: '#86868B', marginBottom: 12, lineHeight: 1.5 }}>
-                  {streamDone ? '生成完毕，即将跳转至结果页' : '内容逐字显示中...'}
+                  {streamDone ? '上诉状已生成，点击按钮查看结果' : '内容逐字显示中...'}
                 </div>
                 <div style={{ fontSize: 14, lineHeight: 1.9, color: '#1D1D1F', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '60vh', overflow: 'auto' }}>
                   {streamingText}
                   {!streamDone && <span style={{ display: 'inline-block', width: 2, height: 14, background: '#0071E3', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />}
                 </div>
               </div>
+              {streamDone && (
+                <button
+                  onClick={() => router.push('/result')}
+                  style={{ marginTop: 20, width: '100%', padding: '14px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: '15px', fontWeight: 600, minHeight: 48, boxShadow: '0 2px 8px rgba(0,113,227,0.3)' }}
+                >查看结果 →</button>
+              )}
             </>
           )}
         </div>

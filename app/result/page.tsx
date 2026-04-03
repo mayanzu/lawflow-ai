@@ -11,6 +11,7 @@ export default function ResultPage() {
   const [loading, setLoading] = useState(true)
   const [legalBasis, setLegalBasis] = useState<string[]>([])
   const [showBasis, setShowBasis] = useState(false)
+  const [isExportMenu, setIsExportMenu] = useState(false)
 
   useEffect(() => {
     const raw = localStorage.getItem('lw_appeal_text')
@@ -39,11 +40,20 @@ export default function ResultPage() {
     navigator.clipboard.writeText(editedText).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
   }
 
-  function handleExport() {
-    const blob = new Blob([editedText], { type: 'text/plain;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = '民事上诉状.txt'; a.click()
-    URL.revokeObjectURL(url)
+  function handleExport(format: 'txt' | 'docx' = 'txt') {
+    if (format === 'docx') {
+      // Build HTML that Word can open (simpler than .docx zip format)
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:SimSun,serif;font-size:14pt;line-height:2;padding:1.5cm;}</style></head><body><p style="text-align:center;font-size:18pt;font-weight:bold;letter-spacing:6pt;margin-bottom:30px;">民事上诉状</p>${editedText.replace(/\n/g, '<br>')}</body></html>`
+      const blob = new Blob(['\ufeff' + html], { type: 'application/msword' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = '民事上诉状.doc'; a.click()
+      URL.revokeObjectURL(url)
+    } else {
+      const blob = new Blob([editedText], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a'); a.href = url; a.download = '民事上诉状.txt'; a.click()
+      URL.revokeObjectURL(url)
+    }
   }
 
   function handleRegenerate() {
@@ -75,7 +85,13 @@ export default function ResultPage() {
         <button onClick={() => router.push('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: 600, color: '#1D1D1F', padding: '8px 0' }}>诉状助手</button>
         <div style={{ display: 'flex', gap: 6 }}>
           <button onClick={handleCopy} style={{ padding: '6px 12px', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: '12px', fontWeight: 500, color: '#1D1D1F', minHeight: 36 }}>{copied ? '已复制' : '复制'}</button>
-          <button onClick={handleExport} style={{ padding: '6px 12px', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: '12px', fontWeight: 500, color: '#1D1D1F', minHeight: 36 }}>导出</button>
+          <div style={{ position: 'relative', display: 'inline-block' }}>
+            <button onClick={() => setIsExportMenu(v => !v)} style={{ padding: '6px 12px', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: '12px', fontWeight: 500, color: '#1D1D1F', minHeight: 36 }}>导出 ▾</button>
+            {isExportMenu && <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: '#FFF', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', border: '1px solid #E8E8ED', overflow: 'hidden', zIndex: 10, minWidth: 120 }}>
+              <button onClick={() => { handleExport('txt'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: '#1D1D1F', textAlign: 'left' }}>TXT 文本</button>
+              <button onClick={() => { handleExport('docx'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: '#1D1D1F', textAlign: 'left', borderTop: '1px solid #F0F0F0' }}>DOC Word</button>
+            </div>}
+          </div>
           <button onClick={handleRegenerate} style={{ padding: '6px 12px', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: '12px', color: '#86868B', minHeight: 36 }}>重新生成</button>
         </div>
       </nav>

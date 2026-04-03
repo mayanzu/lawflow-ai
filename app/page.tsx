@@ -1,14 +1,16 @@
 'use client'
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 
 export default function Home() {
   const router = useRouter()
   const [uploadPct, setUploadPct] = useState(-1)
   const [isDragActive, setIsDragActive] = useState(false)
-  
+  const [errorMsg, setErrorMsg] = useState('')
+
   const doUpload = (file: File) => {
+    setErrorMsg('')
     Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k))
     localStorage.setItem('lw_file_name', file.name)
     localStorage.setItem('lw_file_size', String(file.size))
@@ -27,11 +29,17 @@ export default function Home() {
         if (data.success) {
           localStorage.setItem('lw_file_id', data.file_id)
           if (data.file_path) localStorage.setItem('lw_file_path', data.file_path)
+          setTimeout(() => router.push(`/flow?file=${encodeURIComponent(file.name)}&t=${Date.now()}`), 300)
+        } else {
+          setErrorMsg(data.error || '上传失败')
+          setUploadPct(-1)
         }
-      } catch {}
-      router.push(`/flow?file=${encodeURIComponent(file.name)}&t=${Date.now()}`)
+      } catch { setErrorMsg('上传响应解析失败'); setUploadPct(-1) }
     }
-    xhr.onerror = () => setUploadPct(-1)
+    xhr.onerror = () => {
+      setErrorMsg('网络错误，请检查连接后重试')
+      setUploadPct(-1)
+    }
     xhr.send(formData)
   }
 
@@ -71,6 +79,31 @@ export default function Home() {
 
       {/* 上传区 */}
       <div style={{ padding: '0 16px 48px', maxWidth: '480px', margin: '0 auto' }}>
+        {/* 错误提示 */}
+        <AnimatePresence>
+          {errorMsg && (
+            <motion.div
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+              style={{
+                margin: '0 0 16px',
+                padding: '12px 16px',
+                borderRadius: 12,
+                background: '#FEF0EF',
+                border: '1px solid #F5C6C5',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12
+              }}
+            >
+              <span style={{ fontSize: 14, color: '#D93025', fontWeight: 500 }}>{errorMsg}</span>
+              <button onClick={() => setErrorMsg('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#D93025', padding: '0 4px', lineHeight: 1 }}>×</button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <div
           onDrop={onDrop}
           onDragOver={onDragOver}
@@ -95,7 +128,7 @@ export default function Home() {
           ) : (
             <>
               <p style={{ fontSize: '15px', fontWeight: 600, color: '#1D1D1F', margin: '0 0 6px' }}>
-                {isDragActive ? '松开上传' : '点击或拖拽上传判决书'}
+                {isDragActive ? '松开上传' : '点击或拖拽上诉书'}
               </p>
               <p style={{ fontSize: '13px', color: '#86868B', margin: '0 0 20px' }}>支持 PDF、PNG、JPG，最大 50MB</p>
               <label htmlFor="file-upload" style={{ display: 'inline-block', background: '#0071E3', color: '#fff', border: 'none', borderRadius: '980px', padding: '12px 24px', fontSize: '15px', fontWeight: 500, cursor: 'pointer' }}>
