@@ -64,15 +64,15 @@ export default function Home() {
   // 上传中：全屏动画
   if (uploading) {
     return (
-      <div style={{ minHeight: '100vh', background: '#FFFFFF', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-        <div style={{ textAlign: 'center', padding: '0 24px' }}>
+      <div style={{ minHeight: '100vh', background: '#FFFFFF', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }}>
+        <div style={{ textAlign: 'center', padding: '0 24px', width: '100%', maxWidth: '400px' }}>
           <div style={{ width: 48, height: 48, borderRadius: '50%', border: '3px solid #F0F0F0', borderTopColor: '#0071E3', animation: 'spin 0.8s linear infinite', margin: '0 auto 24px' }} />
-          <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#1D1D1F', marginBottom: '8px' }}>文件上传中</h2>
-          <p style={{ fontSize: '14px', color: '#86868B', marginBottom: '24px', minHeight: 20 }}>{uploadPct < 100 ? '上传完成后自动进入分析' : '正在跳转...'}</p>
-          <div style={{ width: 280, height: 4, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden', margin: '0 auto' }}>
+          <h2 style={{ fontSize: 'clamp(18px, 2.5vw, 22px)', fontWeight: 700, color: '#1D1D1F', marginBottom: '8px' }}>文件上传中</h2>
+          <p style={{ fontSize: 'clamp(13px, 1.8vw, 15px)', color: '#86868B', marginBottom: '24px', minHeight: 20 }}>{uploadPct < 100 ? '上传完成后自动进入分析' : '正在跳转...'}</p>
+          <div style={{ width: '100%', maxWidth: '280px', height: 4, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden', margin: '0 auto' }}>
             <motion.div style={{ height: '100%', background: '#0071E3', borderRadius: 2 }} animate={{ width: `${uploadPct}%` }} transition={{ duration: 0.15 }} />
           </div>
-          <p style={{ fontSize: '22px', fontWeight: 700, color: '#0071E3', marginTop: '12px' }}>{uploadPct}%</p>
+          <p style={{ fontSize: 'clamp(18px, 3vw, 24px)', fontWeight: 700, color: '#0071E3', marginTop: '12px' }}>{uploadPct}%</p>
         </div>
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
@@ -80,25 +80,25 @@ export default function Home() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: 'inherit' }}>
       {/* 导航栏 */}
-      <div style={{ padding: '12px 16px', borderBottom: '1px solid #F5F5F7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: '17px', fontWeight: 600, color: '#1D1D1F' }}>诉状助手</span>
-        <button onClick={() => router.push('/history')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '14px', color: '#0071E3', fontWeight: 500, padding: '8px 4px' }}>历史记录</button>
+      <div style={{ padding: 'clamp(12px, 2vw, 16px) clamp(16px, 3vw, 32px)', borderBottom: '1px solid #F5F5F7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 'clamp(16px, 2vw, 19px)', fontWeight: 600, color: '#1D1D1F' }}>诉状助手</span>
+        <button onClick={() => router.push('/history')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 'clamp(13px, 1.8vw, 15px)', color: '#0071E3', fontWeight: 500, padding: '8px 4px' }}>历史记录</button>
       </div>
 
       {/* 标题区 */}
-      <div style={{ padding: '48px 24px 32px', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '28px', fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.03em', color: '#1D1D1F', margin: '0 0 12px' }}>
+      <div style={{ padding: 'clamp(36px, 6vw, 64px) clamp(20px, 4vw, 32px) clamp(24px, 4vw, 40px)', textAlign: 'center', maxWidth: '640px', margin: '0 auto' }}>
+        <h1 style={{ fontSize: 'clamp(24px, 4vw, 34px)', fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.03em', color: '#1D1D1F', margin: '0 0 12px' }}>
           把判决书变成<br />专业上诉状
         </h1>
-        <p style={{ fontSize: '16px', lineHeight: 1.5, color: '#6E6E73', margin: 0 }}>
+        <p style={{ fontSize: 'clamp(14px, 2.2vw, 17px)', lineHeight: 1.5, color: '#6E6E73', margin: 0 }}>
           上传一审判决书，AI 自动识别，生成规范的民事上诉状。
         </p>
       </div>
 
       {/* 上传区 */}
-      <div style={{ padding: '0 16px 48px', maxWidth: '480px', margin: '0 auto' }}>
+      <div style={{ padding: '0 clamp(16px, 3vw, 32px) clamp(40px, 6vw, 64px)', maxWidth: 'clamp(400px, 80vw, 560px)', margin: '0 auto' }}>
         {/* 错误提示 */}
         <AnimatePresence>
           {errorMsg && (
@@ -132,17 +132,17 @@ export default function Home() {
           style={{
             border: isDragActive ? '2px solid #0071E3' : '2px dashed #E0E0E0',
             borderRadius: '16px',
-            padding: '36px 20px',
+            padding: 'clamp(24px, 4vw, 40px) clamp(16px, 3vw, 24px)',
             transition: 'all 0.2s',
             background: isDragActive ? 'rgba(0,113,227,0.04)' : '#F8F9FA',
             textAlign: 'center',
           }}
         >
-          <p style={{ fontSize: '15px', fontWeight: 600, color: '#1D1D1F', margin: '0 0 6px' }}>
+          <p style={{ fontSize: 'clamp(14px, 2vw, 16px)', fontWeight: 600, color: '#1D1D1F', margin: '0 0 6px' }}>
             {isDragActive ? '松开上传' : '点击或拖拽上诉书'}
           </p>
-          <p style={{ fontSize: '13px', color: '#86868B', margin: '0 0 20px' }}>支持 PDF、PNG、JPG，最大 50MB</p>
-          <label htmlFor="file-upload" style={{ display: 'inline-block', background: '#0071E3', color: '#fff', border: 'none', borderRadius: '980px', padding: '12px 24px', fontSize: '15px', fontWeight: 500, cursor: 'pointer' }}>
+          <p style={{ fontSize: 'clamp(12px, 1.8vw, 14px)', color: '#86868B', margin: '0 0 clamp(16px, 2vw, 24px)' }}>支持 PDF、PNG、JPG，最大 50MB</p>
+          <label htmlFor="file-upload" style={{ display: 'inline-block', background: '#0071E3', color: '#fff', border: 'none', borderRadius: '980px', padding: 'clamp(10px, 1.5vw, 14px) clamp(20px, 3vw, 28px)', fontSize: 'clamp(14px, 2vw, 16px)', fontWeight: 500, cursor: 'pointer' }}>
             选择文件
           </label>
           <input id="file-upload" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={onFileChange} style={{ display: 'none' }} />
@@ -150,19 +150,19 @@ export default function Home() {
       </div>
 
       {/* 流程说明 */}
-      <div style={{ padding: '0 16px 80px' }}>
-        <p style={{ fontSize: '13px', fontWeight: 600, color: '#0071E3', textAlign: 'center', marginBottom: '24px' }}>处理流程</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', maxWidth: '480px', margin: '0 auto' }}>
+      <div style={{ padding: '0 clamp(16px, 3vw, 32px) clamp(60px, 8vw, 96px)', maxWidth: 'clamp(400px, 90vw, 560px)', margin: '0 auto' }}>
+        <p style={{ fontSize: 'clamp(12px, 1.8vw, 14px)', fontWeight: 600, color: '#0071E3', textAlign: 'center', marginBottom: '20px' }}>处理流程</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(160px, 100%), 1fr))', gap: 'clamp(12px, 2vw, 20px)' }}>
           {[
             { step: '01', title: '文件上传', desc: '支持扫描件' },
             { step: '02', title: 'AI 法律分析', desc: '提取案件要素' },
             { step: '03', title: '生成上诉状', desc: '规范的文书格式' },
             { step: '04', title: '导出与编辑', desc: '支持编辑导出' },
           ].map((f, i) => (
-            <div key={i} style={{ background: '#F8F9FA', borderRadius: '12px', padding: '16px' }}>
-              <div style={{ fontSize: '11px', fontWeight: 600, color: '#0071E3', marginBottom: '6px' }}>{f.step}</div>
-              <div style={{ fontSize: '14px', fontWeight: 600, color: '#1D1D1F', marginBottom: '4px' }}>{f.title}</div>
-              <div style={{ fontSize: '12px', color: '#86868B', lineHeight: 1.5 }}>{f.desc}</div>
+            <div key={i} style={{ background: '#F8F9FA', borderRadius: '12px', padding: 'clamp(12px, 2vw, 18px)' }}>
+              <div style={{ fontSize: 'clamp(10px, 1.5vw, 12px)', fontWeight: 600, color: '#0071E3', marginBottom: '6px' }}>{f.step}</div>
+              <div style={{ fontSize: 'clamp(13px, 2vw, 15px)', fontWeight: 600, color: '#1D1D1F', marginBottom: '4px' }}>{f.title}</div>
+              <div style={{ fontSize: 'clamp(11px, 1.6vw, 13px)', color: '#86868B', lineHeight: 1.5 }}>{f.desc}</div>
             </div>
           ))}
         </div>

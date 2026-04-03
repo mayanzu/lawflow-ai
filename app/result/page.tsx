@@ -53,6 +53,7 @@ export default function ResultPage() {
     } catch (e) {
       console.error('Failed to save history:', e)
     }
+
     const basisStr = localStorage.getItem('lw_legal_basis')
     if (basisStr) { try { setLegalBasis(JSON.parse(basisStr)) } catch {} }
     setLoading(false)
@@ -64,8 +65,8 @@ export default function ResultPage() {
 
   function handleExport(format: 'txt' | 'docx' = 'txt') {
     if (format === 'docx') {
-      // Build HTML that Word can open (simpler than .docx zip format)
-      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:SimSun,serif;font-size:14pt;line-height:2;padding:1.5cm;}</style></head><body><p style="text-align:center;font-size:18pt;font-weight:bold;letter-spacing:6pt;margin-bottom:30px;">民事上诉状</p>${editedText.replace(/\n/g, '<br>')}</body></html>`
+      // Build HTML that Word can open
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:SimSun,serif;font-size:14pt;line-height:2;padding:1.5cm;text-align:justify;}</style></head><body><p style="text-align:center;font-size:18pt;font-weight:bold;letter-spacing:6pt;margin-bottom:30px;">民事上诉状</p>${editedText.replace(/\n/g, '<br>')}</body></html>`
       const blob = new Blob(['\ufeff' + html], { type: 'application/msword' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a'); a.href = url; a.download = '民事上诉状.doc'; a.click()
@@ -84,84 +85,78 @@ export default function ResultPage() {
     router.push('/')
   }
 
-  if (loading) return <div style={{ minHeight: '100vh', background: '#F8F9FA', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system, BlinkMacSystemFont', color: '#86868B', fontSize: '15px' }}>加载中...</div>
+  if (loading) return <div style={{ minHeight: '100vh', background: '#F8F9FA', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit', color: '#86868B', fontSize: '15px' }}>加载中...</div>
 
   if (!appealText) return (
-    <div style={{ minHeight: '100vh', background: '#F8F9FA', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-      <nav style={{ padding: '12px 16px', background: '#FFF', borderBottom: '1px solid #E8EAED' }}>
+    <div style={{ minHeight: '100vh', background: '#F8F9FA', fontFamily: 'inherit' }}>
+      <nav style={{ padding: 'clamp(12px, 2vw, 16px) clamp(16px, 3vw, 24px)', background: '#FFF', borderBottom: '1px solid #E8EAED' }}>
         <button onClick={() => router.push('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px', fontWeight: 600, color: '#1D1D1F' }}>诉状助手</button>
       </nav>
-      <div style={{ maxWidth: 480, margin: '80px auto', textAlign: 'center', padding: '0 24px' }}>
-        <div style={{ fontSize: 40, marginBottom: 16 }}></div>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#1D1D1F', marginBottom: 8 }}>未找到诉状</h2>
-        <p style={{ fontSize: '14px', color: '#86868B', marginBottom: 24, lineHeight: 1.6 }}>没有找到生成的诉状内容，请重新上传判决书生成。</p>
-        <button onClick={() => router.push('/')} style={{ padding: '12px 24px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, cursor: 'pointer', fontSize: '15px', fontWeight: 600 }}>重新生成</button>
+      <div style={{ maxWidth: 'clamp(400px, 90vw, 520px)', margin: 'clamp(60px, 10vw, 100px) auto', textAlign: 'center', padding: '0 clamp(20px, 4vw, 32px)' }}>
+        <div style={{ fontSize: 40, marginBottom: 16 }}>📄</div>
+        <h2 style={{ fontSize: 'clamp(18px, 3vw, 22px)', fontWeight: 700, color: '#1D1D1F', marginBottom: 8 }}>未找到诉状</h2>
+        <p style={{ fontSize: 'clamp(13px, 2vw, 15px)', color: '#86868B', marginBottom: 24, lineHeight: 1.6 }}>没有找到生成的诉状内容，请重新上传判决书生成。</p>
+        <button onClick={() => router.push('/')} style={{ padding: '12px 24px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, cursor: 'pointer', fontSize: '15px', fontWeight: 600, minWidth: '48px' }}>重新生成</button>
       </div>
     </div>
   )
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F8F9FA', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: '#F8F9FA', fontFamily: 'inherit' }}>
       {/* 导航 */}
-      <nav style={{ padding: '12px 16px', background: '#FFF', borderBottom: '1px solid #E8EAED', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 100 }}>
-        <button onClick={() => router.push('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: 600, color: '#1D1D1F', padding: '8px 0' }}>诉状助手</button>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button onClick={handleCopy} style={{ padding: '6px 12px', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: '12px', fontWeight: 500, color: '#1D1D1F', minHeight: 36 }}>{copied ? '已复制' : '复制'}</button>
+      <nav style={{ padding: 'clamp(12px, 2vw, 16px) clamp(16px, 3vw, 24px)', background: '#FFF', borderBottom: '1px solid #E8EAED', display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'sticky', top: 0, zIndex: 100 }}>
+        <button onClick={() => router.push('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 'clamp(15px, 2vw, 18px)', fontWeight: 600, color: '#1D1D1F', padding: '8px 0' }}>诉状助手</button>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button onClick={handleCopy} style={{ padding: 'clamp(6px, 1vw, 8px) clamp(10px, 2vw, 14px)', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: 'clamp(11px, 1.5vw, 13px)', fontWeight: 500, color: copied ? '#0071E3' : '#1D1D1F', minHeight: 36 }}>{copied ? '✓ 已复制' : '复制'}</button>
           <div style={{ position: 'relative', display: 'inline-block' }}>
-            <button onClick={() => setIsExportMenu(v => !v)} style={{ padding: '6px 12px', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: '12px', fontWeight: 500, color: '#1D1D1F', minHeight: 36 }}>导出 ▾</button>
-            {isExportMenu && <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: '#FFF', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', border: '1px solid #E8E8ED', overflow: 'hidden', zIndex: 10, minWidth: 120 }}>
-              <button onClick={() => { handleExport('txt'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: '#1D1D1F', textAlign: 'left' }}>TXT 文本</button>
-              <button onClick={() => { handleExport('docx'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: '#1D1D1F', textAlign: 'left', borderTop: '1px solid #F0F0F0' }}>DOC Word</button>
-            </div>}
+            <button onClick={() => setIsExportMenu(v => !v)} style={{ padding: 'clamp(6px, 1vw, 8px) clamp(10px, 2vw, 14px)', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: 'clamp(11px, 1.5vw, 13px)', fontWeight: 500, color: '#1D1D1F', minHeight: 36 }}>导出 ▾</button>
+            {isExportMenu && (
+              <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: '#FFF', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', border: '1px solid #E8E8ED', overflow: 'hidden', zIndex: 10, minWidth: 130 }}>
+                <button onClick={() => { handleExport('txt'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: '#1D1D1F', textAlign: 'left', borderBottom: '1px solid #F0F0F0' }}>TXT 文本</button>
+                <button onClick={() => { handleExport('docx'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: '#1D1D1F', textAlign: 'left' }}>DOC Word</button>
+              </div>
+            )}
           </div>
-          <button onClick={handleRegenerate} style={{ padding: '6px 12px', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: '12px', color: '#86868B', minHeight: 36 }}>重新生成</button>
+          <button onClick={handleRegenerate} style={{ padding: 'clamp(6px, 1vw, 8px) clamp(10px, 2vw, 14px)', background: '#FFF', border: '1px solid #E0E0E0', borderRadius: 8, cursor: 'pointer', fontSize: 'clamp(11px, 1.5vw, 13px)', color: '#86868B', minHeight: 36 }}>重新生成</button>
         </div>
       </nav>
 
-      <div style={{ padding: '20px 16px 80px', maxWidth: 800, margin: '0 auto' }}>
+      <div style={{ padding: 'clamp(16px, 3vw, 24px) clamp(16px, 3vw, 24px) clamp(60px, 8vw, 96px)', maxWidth: 'clamp(400px, 95vw, 840px)', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: 20 }}>
-          <h1 style={{ fontSize: '20px', fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px' }}>民事上诉状生成完成</h1>
-          <p style={{ fontSize: '13px', color: '#86868B', margin: 0 }}>{editedText.length} 字</p>
+          <h1 style={{ fontSize: 'clamp(18px, 3vw, 22px)', fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px' }}></h1>
+          <p style={{ fontSize: 'clamp(12px, 1.8vw, 14px)', color: '#86868B', margin: 0 }}>{editedText.length} 字</p>
         </div>
 
-        <div style={{ background: '#FFF', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,0,0,0.06)' }}>
+        <div style={{ background: '#FFF', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
           {/* 工具栏 */}
-          <div style={{ padding: '14px 16px', borderBottom: '1px solid #F5F5F5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <h2 style={{ fontSize: '15px', fontWeight: 600, color: '#1D1D1F', margin: 0 }}>民事上诉状</h2>
-            <button onClick={() => setIsEditing(!isEditing)} style={{ background: isEditing ? '#0071E3' : '#F5F5F7', color: isEditing ? '#FFF' : '#1D1D1F', border: 'none', borderRadius: 980, padding: '6px 14px', cursor: 'pointer', fontSize: '13px', fontWeight: 500, transition: 'all 0.2s' }}>{isEditing ? '完成编辑' : '编辑'}</button>
+          <div style={{ padding: 'clamp(12px, 2vw, 16px) clamp(14px, 2.5vw, 18px)', borderBottom: '1px solid #F5F5F5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h2 style={{ fontSize: 'clamp(14px, 2vw, 16px)', fontWeight: 600, color: '#1D1D1F', margin: 0 }}>民事上诉状</h2>
+            <button onClick={() => setIsEditing(!isEditing)} style={{ background: isEditing ? '#0071E3' : '#F5F5F7', color: isEditing ? '#FFF' : '#1D1D1F', border: 'none', borderRadius: 980, padding: 'clamp(6px, 1vw, 8px) clamp(12px, 2vw, 16px)', cursor: 'pointer', fontSize: 'clamp(12px, 1.8vw, 14px)', fontWeight: 500, transition: 'all 0.2s' }}>{isEditing ? '完成编辑' : '编辑'}</button>
           </div>
 
           {/* 内容 */}
           {isEditing ? (
-            <textarea value={editedText} onChange={e => setEditedText(e.target.value)} style={{ width: '100%', minHeight: 400, border: 'none', padding: '16px', fontSize: '14px', lineHeight: 1.9, color: '#1D1D1F', fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }} />
+            <textarea value={editedText} onChange={e => setEditedText(e.target.value)} style={{ width: '100%', minHeight: 'clamp(300px, 50vw, 500px)', border: 'none', padding: 'clamp(14px, 2vw, 18px)', fontSize: 'clamp(13px, 2vw, 15px)', lineHeight: 1.9, color: '#1D1D1F', fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box' }} />
           ) : (
-            <div style={{ padding: '16px', fontSize: '14px', lineHeight: 1.9, color: '#1D1D1F', whiteSpace: 'pre-wrap', wordBreak: 'break-word', minHeight: 300 }}>{editedText}</div>
-          )}
-
-          {/* 法律依据 */}
-          {legalBasis.length > 0 && (
-            <div style={{ padding: '14px 16px', borderTop: '1px solid #F0F0F0' }}>
-              <button onClick={() => setShowBasis(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '13px', color: '#86868B', display: 'flex', alignItems: 'center', gap: 6, padding: 0 }}>
-                <span style={{ color: showBasis ? '#0071E3' : '#86868B' }}>{showBasis ? '' : ''}</span>
-                本文书引用法条 ({legalBasis.length} 条)
-              </button>
-              {showBasis && (
-                <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {legalBasis.map((art, i) => (
-                    <span key={i} style={{ background: '#E8F0FE', color: '#0071E3', padding: '3px 10px', borderRadius: 6, fontSize: '12px', fontWeight: 500 }}>{art}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* 底部 */}
-          {editedText !== appealText && (
-            <div style={{ padding: '10px 16px', borderTop: '1px solid #F0F0F0', display: 'flex', justifyContent: 'flex-end' }}>
-              <button onClick={() => setEditedText(appealText)} style={{ background: 'none', border: 'none', color: '#0071E3', cursor: 'pointer', fontSize: '12px', fontWeight: 500 }}>恢复原始内容</button>
-            </div>
+            <div style={{ padding: 'clamp(14px, 2vw, 18px)', fontSize: 'clamp(13px, 2vw, 15px)', lineHeight: 1.9, color: '#1D1D1F', whiteSpace: 'pre-wrap', wordBreak: 'break-word', minHeight: 'clamp(200px, 40vw, 300px)' }}>{editedText}</div>
           )}
         </div>
+
+        {/* 法律依据 */}
+        {legalBasis.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <button onClick={() => setShowBasis(!showBasis)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 'clamp(13px, 1.8vw, 15px)', fontWeight: 600, color: '#0071E3', display: 'flex', alignItems: 'center', gap: 6 }}>
+              {showBasis ? '▾' : '▸'} 法律依据（{legalBasis.length} 条）
+            </button>
+            {showBasis && (
+              <div style={{ marginTop: 10, background: '#FFF', borderRadius: 14, padding: 'clamp(14px, 2vw, 18px)', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}>
+                {legalBasis.map((article, i) => (
+                  <div key={i} style={{ padding: '8px 10px', borderRadius: 8, marginBottom: i < legalBasis.length - 1 ? 6 : 0, background: '#F8F9FA', fontSize: 'clamp(12px, 1.8vw, 14px)', fontWeight: 500, color: '#1D1D1F' }}>{article}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
