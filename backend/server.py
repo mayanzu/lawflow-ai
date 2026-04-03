@@ -43,77 +43,135 @@ def _get_ocr_img():
             if _rapidocr_img is None:
                 try:
                     from rapidocr import RapidOCR
-                    _rapidocr_img = RapidOCR()
+                    # 低资源环境精确度优化参数
+                    _rapidocr_img = RapidOCR(
+                        det_limit_side_len=1280,      # 默认960 → 1280 减少小字漏检
+                        det_unclip_ratio=1.8,          # 默认1.5 → 1.8 文本框更宽泛
+                        rec_score=0.4,                 # 降过滤阈值保留模糊字
+                        det_score=0.4,                 # 降检测阈值
+                    )
                 except ImportError as e:
                     print(f"[OCR-img] {e}", flush=True)
     return _rapidocr_img
 
-def _preprocess_image(path):
-    """图片预处理：提升 OCR 识别率"""
-    from PIL import Image, ImageFilter, ImageEnhance
-    import io
+def _preprocess_image_cv2(path):
+    """OpenCV 图像预处理：CLAHE + 二值化 + 倾斜校正 + 智能缩放"""
+    import numpy as np
+    cv2 = __import__('cv2')
 
-    img = Image.open(path).convert('RGB')
-    w, h = img.size
+    # 1. 读取图片
+    img = cv2.imread(path)
+    if img is None:
+        return None
+    
+    h, w = img.shape[:2]
 
-    # 超大图片：缩放到适合 OCR 的宽度（2000-3000px）
-    target_width = 2400
-    if w > target_width:
-        ratio = target_width / w
-        img = img.resize((target_width, int(h * ratio)), Image.LANCZOS)
+    # 2. 灰度化
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # 太小的图片：放大到至少 1200px 宽
-    if img.size[0] < 1200 and w > 10:
-        ratio = 1024 / img.size[0]
-        img = img.resize((1024, int(img.size[1] * ratio)), Image.LANCZOS)
+    # 3. CLAHE 自适应对比度增强（消除阴影 + 增强文字）
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
 
-    # 转灰度
-    gray = img.convert('L')
+    # 4. 高斯模糊去噪
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    # 增强对比度（对扫描件尤其有效）
-    enhancer = ImageEnhance.Contrast(gray)
-    gray = enhancer.enhance(1.2)
+    # 5. 自适应二值化（文字纯黑/背景纯白）
+    block_size = max(11, int(h / 100) * 2 + 1)
+    if block_size % 2 == 0:
+        block_size += 1
+    binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                    cv2.THRESH_BINARY, block_size, 10)
 
-    # 降噪：轻微模糊去毛刺
-    gray = gray.filter(ImageFilter.MedianFilter(size=3))
+    # 6. 倾斜校正
+    coords = np.column_stack(np.where(binary > 0))
+    if len(coords) > 0:
+        rect = cv2.minAreaRect(coords)
+        angle = rect[-1]
+        if angle >= 45:
+            angle = -(90 - angle)
+        elif angle <= -45:
+            angle = abs(90 + angle)
+        
+        if abs(angle) > 0.5:
+            (hc, wc) = binary.shape[:2]
+            center = (wc // 2, hc // 2)
+            M = cv2.getRotationMatrix2D(center, angle, 1.0)
+            binary = cv2.warpAffine(binary, M, (wc, hc),
+                                     flags=cv2.INTER_CUBIC,
+                                     borderMode=cv2.BORDER_REPLICATE)
 
-    return gray
+    # 7. 智能缩放（确保文字高度适合 OCR 最佳识别范围 24-48px）
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    if num_labels > 2:
+        heights = stats[1:, cv2.CC_STAT_HEIGHT]
+        widths = stats[1:, cv2.CC_STAT_WIDTH]
+        mask = (heights > 4) & (heights < h * 0.5) & (widths > 4)
+        if mask.any():
+            median_h = np.median(heights[mask])
+            if median_h > 0:
+                target_h = 36
+                if median_h < target_h * 0.7:
+                    scale = min(target_h / median_h, 3.0)
+                    binary = cv2.resize(binary, (0, 0), fx=scale, fy=scale,
+                                        interpolation=cv2.INTER_CUBIC)
+                elif median_h > target_h * 3:
+                    scale = max(target_h / median_h, 0.2)
+                    binary = cv2.resize(binary, (0, 0), fx=scale, fy=scale,
+                                        interpolation=cv2.INTER_AREA)
+
+    # 限制最大尺寸防止 OOM
+    bh, bw = binary.shape[:2]
+    max_dim = 3000
+    if max(bh, bw) > max_dim:
+        scale = max_dim / max(bh, bw)
+        binary = cv2.resize(binary, (0, 0), fx=scale, fy=scale,
+                            interpolation=cv2.INTER_AREA)
+
+    return binary
 
 
 def _ocr_image(path):
-    """图片 OCR：PIL 预处理 → RapidOCR"""
+    """图片 OCR：OpenCV 预处理 + RapidOCR + 原图兜底"""
     ocr = _get_ocr_img()
     if not ocr:
         return ""
     try:
-        # 预处理（转灰度、缩放、降噪、增强对比度）
-        preprocessed = _preprocess_image(path)
-        import tempfile, io
-        buf = io.BytesIO()
-        preprocessed.save(buf, format='PNG')
-        tmp_img = tempfile.mktemp(suffix=".png")
-        with open(tmp_img, 'wb') as f:
-            f.write(buf.getvalue())
+        import tempfile
+        cv2 = __import__('cv2')
 
-        try:
-            result = ocr(tmp_img)
-        finally:
-            if os.path.exists(tmp_img):
-                os.remove(tmp_img)
-
-        if result and hasattr(result, 'txts'):
-            texts = [t for t in result.txts if t and t.strip()]
-            total = "\n".join(texts)
-            if len(total) > 50:
-                return total
+        # 步骤1: OpenCV 预处理（CLAHE + 二值化 + 倾斜校正 + 缩放）
+        preprocessed = _preprocess_image_cv2(path)
         
-        # 预处理后结果不够好，fallback 到原图
-        result = ocr(path)
-        if result and hasattr(result, 'txts'):
-            return "\n".join([t for t in result.txts if t and t.strip()])
+        if preprocessed is not None:
+            tmp_cv = tempfile.mktemp(suffix=".png")
+            cv2.imwrite(tmp_cv, preprocessed)
+            try:
+                result = ocr(tmp_cv)
+            finally:
+                if os.path.exists(tmp_cv):
+                    os.remove(tmp_cv)
+
+            if result and hasattr(result, 'txts'):
+                texts = [t for t in result.txts if t and t.strip()]
+                total = "\n".join(texts)
+                if len(total) > 50:
+                    return total
+
+        # 步骤2: 预处理效果不够好，用原图 + 调高检测边长
+        try:
+            result2 = ocr(path)
+            if result2 and hasattr(result2, 'txts'):
+                texts2 = [t for t in result2.txts if t and t.strip()]
+                total2 = "\n".join(texts2)
+                if len(total2) > 50:
+                    return total2
+        except Exception:
+            pass
     except Exception as e:
         print(f"[OCR-img] {e}", flush=True)
     return ""
+
 
 def _ocr_pdf(path):
     """PDF OCR:
