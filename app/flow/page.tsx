@@ -20,7 +20,7 @@ const STEPS = [
 
 function sleep(ms: number) { return new Promise<void>(r => setTimeout(r, ms)) }
 
-export default function FlowPage() {
+function FlowContent() {
   const router = useRouter()
   const search = useSearchParams()
 
@@ -29,7 +29,6 @@ export default function FlowPage() {
   const [rateLimit, setRateLimit] = useState(false)
   const [retryAfter, setRetryAfter] = useState(0)
   const [ocrText, setOcrText] = useState('')
-  const [analyzeInfo, setAnalyzeInfo] = useState<Record<string, string>>({})
   const [ocrExpanded, setOcrExpanded] = useState(true)
   const [fileName, setFileName] = useState('')
 
@@ -37,7 +36,6 @@ export default function FlowPage() {
   const fileIdRef = useRef<string>('')
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const abortRef = useRef<AbortController | null>(null)
-  const ocrTextRef = useRef<string>('')
 
   function setStepStatus(idx: number, status: StepStatus, progress = 0, message = '') {
     setSteps(prev => prev.map((s, i) => i === idx ? { ...s, status, progress, message } : s))
@@ -77,7 +75,7 @@ export default function FlowPage() {
       const ocrRes = await callApi('/api/ocr', { file_id: fileIdRef.current })
       if (!ocrRes.success) throw new Error(ocrRes.error || 'OCR 识别失败')
       const text = ocrRes.text || ''
-      ocrTextRef.current = text; setOcrText(text)
+      setOcrText(text)
       localStorage.setItem('lw_ocr_text', text)
       setStepStatus(1, 'done', 100, `识别完成 ${text.length} 字`)
     } catch (err: any) {
@@ -85,23 +83,20 @@ export default function FlowPage() {
       setStepStatus(1, 'error', 0, err.message); setError(`OCR 识别失败: ${err.message}`); return
     }
 
-    // AI 分析
-    setStepStatus(2, 'active', 10, '正在提取案件信息...')
+    // AI 分析（静默运行，不展示 UI）
+    setStepStatus(2, 'active', 10, '正在分析案件...')
     try {
-      const analyzeRes = await callApi('/api/analyze', { text: ocrTextRef.current })
-      if (!analyzeRes.success) throw new Error(analyzeRes.error || '分析失败')
-      const info = analyzeRes.info || {}
-      setAnalyzeInfo(info)
-      localStorage.setItem('lw_analyze_info', JSON.stringify(info))
-      setStepStatus(2, 'done', 100, `提取 ${Object.keys(info).length} 项`)
-    } catch (err: any) {
-      if (err.message === '请求已取消') return
-      setStepStatus(2, 'error', 0, err.message); setError(`分析失败: ${err.message}`); return
+      const analyzeRes = await callApi('/api/analyze', { text: ocrText })
+      if (analyzeRes.success && analyzeRes.info) {
+        localStorage.setItem('lw_analyze_info', JSON.stringify(analyzeRes.info))
+      }
+    } catch {
+      // AI 分析失败不影响，用户可以在确认页手动填写
     }
-  }
+    setStepStatus(2, 'done', 100, '完成')
 
-  function goToConfirm() {
-    router.push('/confirm')
+    // OCR 完成，1秒后自动跳转到确认页
+    setTimeout(() => router.push('/confirm'), 1000)
   }
 
   useEffect(() => {
@@ -145,10 +140,10 @@ export default function FlowPage() {
       {/* 页面标题 */}
       <div style={{ textAlign: 'center', padding: '24px 16px 16px' }}>
         <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px' }}>{error ? '处理出错' : '正在处理'}</h2>
-        <p style={{ fontSize: '13px', color: '#86868B', margin: 0 }}>{error ? '请根据提示操作' : '请稍候'}</p>
+        <p style={{ fontSize: '13px', color: '#86868B', margin: 0 }}>{error ? '请根据提示操作' : ocrText ? '即将跳转到确认页...' : '请稍候'}</p>
       </div>
 
-      {/* 主内容：单栏布局 */}
+      {/* 主内容 */}
       <div style={{ padding: '0 16px 60px', maxWidth: '600px', margin: '0 auto' }}>
         {/* 步骤列表 */}
         <div style={{ background: '#FFF', borderRadius: '14px', padding: '16px', marginBottom: '16px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
@@ -174,8 +169,8 @@ export default function FlowPage() {
         </div>
 
         {/* OCR 结果 */}
-        {ocrText && (
-          <div style={{ background: '#FFF', borderRadius: '14px', overflow: 'hidden', marginBottom: '16px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
+        {ocrText && !error && (
+          <div style={{ background: '#FFF', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
             <div style={{ padding: '14px 16px', borderBottom: '1px solid #F5F5F5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#86868B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 2px' }}>OCR 识别结果</h3>
@@ -189,34 +184,6 @@ export default function FlowPage() {
               </div>
             )}
           </div>
-        )}
-
-        {/* AI 分析结果 */}
-        {Object.keys(analyzeInfo).length > 0 && (
-          <div style={{ background: '#FFF', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
-            <div style={{ padding: '14px 16px', borderBottom: '1px solid #F5F5F5' }}>
-              <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#86868B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 2px' }}>AI 案件分析</h3>
-              <p style={{ fontSize: '11px', color: '#86868B', margin: 0 }}>已提取 {Object.keys(analyzeInfo).length} 项</p>
-            </div>
-            <div style={{ padding: '10px' }}>
-              {Object.entries(analyzeInfo).filter(([k]) => k !== 'raw').map(([key, val]) => (
-                <div key={key} style={{ padding: '8px 10px', borderRadius: 8, marginBottom: 6, background: '#F8F9FA' }}>
-                  <div style={{ fontSize: '10px', fontWeight: 600, color: '#86868B', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>{key}</div>
-                  <div style={{ fontSize: '13px', fontWeight: 500, color: '#1D1D1F', lineHeight: 1.4, wordBreak: 'break-word' }}>{String(val)}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* 继续按钮 */}
-        {Object.keys(analyzeInfo).length > 0 && !error && (
-          <button
-            onClick={goToConfirm}
-            style={{ marginTop: 16, width: '100%', padding: '14px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: '15px', fontWeight: 600, minHeight: 48, boxShadow: '0 2px 8px rgba(0,113,227,0.3)' }}
-          >
-            继续 →
-          </button>
         )}
 
         {/* 错误提示 */}
@@ -234,4 +201,8 @@ export default function FlowPage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
+}
+
+export default function FlowPage() {
+  return <Suspense><FlowContent /></Suspense>
 }
