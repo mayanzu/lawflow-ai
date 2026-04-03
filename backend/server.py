@@ -26,30 +26,77 @@ def _get_ocr():
         _paddle_ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
     return _paddle_ocr
 
-def _call_ai(prompt, system="", retries=2):
+def _call_ai_stream(prompt, system="", retries=2, callback=None):
     from urllib.request import Request, urlopen
     import time
     msgs = []
     if system: msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
-    body = json.dumps({"model": OPENROUTER_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25})
+    body = json.dumps({"model": OPENROUTER_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25, "stream": True})
     last_err = ""
     for attempt in range(retries + 1):
         req = Request("https://openrouter.ai/api/v1/chat/completions", data=body.encode(), method="POST")
         req.add_header("Content-Type", "application/json")
         req.add_header("Authorization", f"Bearer {OPENROUTER_KEY}")
         try:
-            resp = urlopen(req, timeout=180)
-            data = json.loads(resp.read())
-            return data["choices"][0]["message"]["content"]
+            resp = urlopen(req, timeout=30)
+            buffer = b""
+            while True:
+                chunk = resp.read(8192)
+                if not chunk:
+                    # 处理剩余buffer
+                    if buffer:
+                        buf_str = buffer.decode("utf-8", errors="ignore")
+                        for line in buf_str.split("\n"):
+                            if line.strip().startswith("data: "):
+                                data_str = line.strip()[6:]
+                                if data_str and data_str != "[DONE]":
+                                    try:
+                                        data = json.loads(data_str)
+                                        delta = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                        if delta and callback:
+                                            callback(delta)
+                                    except json.JSONDecodeError:
+                                        pass
+                    break
+                buffer += chunk
+                # 按 \n\n 分隔SSE事件，逐个处理
+                while b"\n\n" in buffer:
+                    event, buffer = buffer.split(b"\n\n", 1)
+                    event_str = event.decode("utf-8", errors="ignore")
+                    if event_str.startswith("data: "):
+                        data_str = event_str[6:].strip()
+                        if data_str == "[DONE]":
+                            if callback: callback("")
+                            return
+                        if data_str:
+                            try:
+                                data = json.loads(data_str)
+                                delta = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                                if delta and callback:
+                                    callback(delta)
+                            except json.JSONDecodeError:
+                                pass
         except Exception as e:
             last_err = str(e)
             if "429" in last_err and attempt < retries:
                 wait = (attempt + 1) * 5
                 time.sleep(wait)
                 continue
-            return f"[AI 调用失败: {last_err}]"
-    return f"[AI 调用失败: {last_err}]"
+            if callback:
+                callback(f"[AI 调用失败: {last_err}]")
+            return
+    if callback:
+        callback(f"[AI 调用失败: {last_err}]")
+
+
+def _call_ai(prompt, system="", retries=2):
+    """同步版本，兼容旧代码"""
+    chunks = []
+    def collect(chunk):
+        chunks.append(chunk)
+    _call_ai_stream(prompt, system, retries, callback=collect)
+    return "".join(chunks)
 
 def _ocr_pdf(path):
     import pdfplumber
@@ -83,7 +130,18 @@ def _ocr_image(path):
             for w in line: parts.append(w[1][0])
     return "\n".join(parts)
 
-class Handler(BaseHTTPRequestHandler):
+class ThreadedHandler(http.server.BaseHTTPRequestHandler):
+    daemon_threads = True
+    def log_message(self, *args): pass  # 关闭日志
+
+class ThreadedTCPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+class Handler(ThreadedHandler):
+    pass
+
+
     def do_OPTIONS(self):
         self.send_response(200)
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -103,6 +161,9 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/ocr": res = self._ocr(body)
             elif p == "/analyze": res = self._analyze(body)
             elif p == "/generate-appeal": res = self._generate(body)
+            elif p == "/generate-appeal-stream":
+                self._generate_stream(body)
+                return
             elif p == "/upload": res = self._upload_json(body)
             else: res = {"success": False, "error": "Unknown"}
         self.send_response(200)
@@ -161,24 +222,183 @@ class Handler(BaseHTTPRequestHandler):
         return {"success": True, "text": text, "length": len(text)}
 
     def _analyze(self, body):
+        """从判决书提取案件信息，支持重试"""
+        import re
         txt = body.get("text", "")
         if not txt: return {"success": False, "error": "No text"}
-        prompt = f'''你是一个专业的法律信息提取系统。从以下判决书中提取关键信息，返回纯JSON格式：
+        # 使用更多文本（6000字）
+        text_chunk = txt[:6000]
 
-{{"案号":"判决书案号","案由":"案由","原告":"原告全称","被告":"被告全称","判决法院":"一审法院全称","判决结果":"一审判决结果的核心内容（1-2句话）","判决日期":"YYYY年MM月DD日或中文数字格式","上诉期限":"几天","上诉法院":"上诉法院全称"}}
+        REQUIRED_FIELDS = ["案号","案由","原告","被告","判决法院","判决日期","判决结果","上诉期限","上诉法院"]
+
+        def build_prompt(extra=""):
+            return f"""你是一个专业的法律信息提取系统。从以下判决书中提取所有关键信息，严格返回JSON格式，所有字段都必须有值，不得遗漏：
+
+{{
+  "案号": "判决书上的完整案号，如(2025)皖0406民初3597号",
+  "案由": "案件类型，如生命权纠纷、民间借贷纠纷等",
+  "原告": "原告全称（自然人：姓名+性别+出生年月+住所地；法人：名称+住所地）",
+  "被告": "被告全称（同上格式）",
+  "判决法院": "作出判决的法院全称，如安徽省淮南市潘集区人民法院",
+  "判决日期": "判决书上载明的日期，格式为YYYY年MM月DD日，如二〇二五年九月三日",
+  "判决结果": "一审法院判决的核心内容摘要（2-3句话概括判决主文）",
+  "上诉期限": "法定期限数字，单位天（默认15天）",
+  "上诉法院": "上诉至哪个人民法院"
+}}
+
+【重要】必须返回完整的JSON，9个字段每一个都必须有值，禁止空字符串，禁止省略任何字段。
+
+{extra}
 
 判决书原文：
-{txt[:3000]}'''
-        r = _call_ai(prompt, "你是法律信息提取AI。只返回JSON，不要任何其他文字或解释。")
-        try:
+{text_chunk}"""
+
+        def try_parse(r):
+            """解析AI响应，尝试提取有效JSON"""
             cl = r.strip()
+            if not cl: return None, "空响应"
             if cl.startswith("```"): cl = cl.split("\n",1)[-1]
-            if cl.endswith("```"): cl = cl[:-3]
-            return {"success": True, "info": json.loads(cl.strip())}
-        except:
-            return {"success": True, "info": {"raw": r}}
+            if cl.endswith("```"): cl = cl[:-3].strip()
+            # 尝试找JSON块
+            m = re.search(r'\{[^{}]*\}', cl, re.DOTALL)
+            if m:
+                try: return json.loads(m.group()), None
+                except: pass
+            try: return json.loads(cl), None
+            except Exception as e: return None, str(e)
+
+        # 第一次请求
+        prompt = build_prompt()
+        r = _call_ai(prompt, "你是法律信息提取AI。只返回纯JSON，不要任何其他文字。")
+        info, err = try_parse(r)
+
+        if info:
+            # 检查缺失字段
+            missing = [f for f in REQUIRED_FIELDS if not info.get(f) or str(info.get(f)).strip() in ("","无","未提取","null","undefined")]
+            if not missing:
+                return {"success": True, "info": info}
+
+            # 重试：补充缺失字段
+            missing_str = "、".join(missing)
+            retry_count = 0
+            while missing and retry_count < 2:
+                retry_count += 1
+                prompt_retry = build_prompt(f"【注意】上次提取缺少以下字段，请从判决书中补充完整：{missing_str}")
+                r = _call_ai(prompt_retry, "你是法律信息提取AI。只返回纯JSON，不要任何其他文字。")
+                info_retry, _ = try_parse(r)
+                if info_retry:
+                    for f in missing:
+                        if info_retry.get(f) and str(info_retry.get(f)).strip() not in ("","无","未提取"):
+                            info[f] = info_retry[f]
+                    missing = [f for f in missing if not info.get(f) or str(info.get(f)).strip() in ("","无","未提取")]
+
+        # 最终兜底：OCR原文补充
+        if info:
+            for f in REQUIRED_FIELDS:
+                if not info.get(f) or str(info.get(f)).strip() in ("","无","未提取","null"):
+                    info[f] = "未提取"
+            return {"success": True, "info": info}
+
+        return {"success": True, "info": {"raw": r if r else ""}}
+
+
+    def _generate_stream(self, body):
+        """SSE 流式生成诉状"""
+        import re, threading, time
+        info = body.get("info", {})
+        ocr_text = body.get("ocr_text", "")
+        firm = "安徽国恒律师事务所"
+        attorney = "赵光辉"
+
+        def send_sse(data_dict):
+            """发送 SSE 事件"""
+            try:
+                self.wfile.write(f"data: {json.dumps(data_dict, ensure_ascii=False)}\n\n".encode())
+                self.wfile.flush()
+            except Exception:
+                pass
+
+        def on_chunk(chunk):
+            full_text.append(chunk)
+            send_sse({"type": "chunk", "content": chunk})
+
+        full_text = []
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            # 生成 prompt（简化）
+            prompt = f"请根据以下信息生成一份民事上诉状：{json.dumps(info, ensure_ascii=False)}，判决书内容：{ocr_text[:1000]}"
+            _call_ai_stream(prompt, retries=2, callback=on_chunk)
+
+            # 提取法律依据
+            text_so_far = "".join(full_text)
+            legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text_so_far)
+            legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
+            send_sse({"type": "done", "appeal": text_so_far, "legal_basis": legal_basis})
+
+        except Exception as e:
+            try:
+                send_sse({"type": "error", "error": str(e)})
+            except Exception:
+                pass
+        finally:
+            try:
+                self.wfile.close()
+            except Exception:
+                pass
 
     def _generate(self, body):
+        import re
+        info = body.get("info", {})
+        ocr_text = body.get("ocr_text", "")
+        firm = "安徽国恒律师事务所"
+        attorney = "赵光辉"
+        position = "上诉人"
+        if ocr_text:
+            idx1 = ocr_text.find(firm); idx2 = ocr_text.find(attorney)
+            start = max(idx1, idx2) - 200 if max(idx1, idx2) >= 0 else 0
+            if start < 0: start = 0
+            context = ocr_text[start:start+300]
+            client_side = "上诉人（原审被告）" if "被告" in context or "被上诉人" not in context else "上诉人（原审原告）"
+        else:
+            client_side = "上诉人"
+
+        prompt = f'''你是安徽国恒律师事务所的资深诉讼律师{attorney}，专注民商事诉讼二十年。
+
+请根据以下判决书信息，撰写一份完整的、可直接提交人民法院的《民事上诉状》。
+
+## 案件信息
+{json.dumps(info, ensure_ascii=False, indent=2)}
+
+## 判决书原文
+{ocr_text[:4000]}
+
+## 写作要求（极其重要）
+1. 当事人：上诉人为我方客户{firm}委托{attorney}律师代理，当事人信息必须填写判决书中的全称，不得使用占位符
+2. 格式严格遵循《民事诉讼法》标准民事上诉状格式
+3. 上诉请求列明2-3项，如：①依法撤销XX人民法院XX号判决；②依法改判...
+4. 事实与理由部分至少分三点，每点含具体事实、法律依据（准确引用法律条文号和条文名称）、结论
+5. 结尾格式：
+   此致
+   [上诉法院全称]
+   上诉人：（原告全称）
+   委托代理人：{firm} {attorney} 律师
+   202X年X月X日
+   附：本上诉状副本X份
+6. 所有名称、案号、金额、日期必须与判决书完全一致
+7. 只输出上诉状正文，无任何解释说明'''
+
+        text = _call_ai(prompt, "直接返回民事上诉状正文，不输出任何额外说明。")
+        import re
+        legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
+        legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
+        return {"success": True, "appeal": text, "legal_basis": legal_basis}
+
         info = body.get("info", {})
         ocr_text = body.get("ocr_text", "")
         firm = "安徽国恒律师事务所"
