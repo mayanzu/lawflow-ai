@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useTransition } from 'react'
+import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -8,31 +8,22 @@ export default function Home() {
   const [uploadPct, setUploadPct] = useState(-1)
   const [isDragActive, setIsDragActive] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
-  const [isTransitioning, setIsTransitioning] = useState(false)
 
   const doUpload = (file: File) => {
     setErrorMsg('')
-    setIsTransitioning(true)
-
-    // 立即保存文件信息并跳转（不等上传完成）
+    // 清理旧数据
     Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k))
     localStorage.setItem('lw_file_name', file.name)
     localStorage.setItem('lw_file_size', String(file.size))
-    localStorage.setItem('lw_file_type', file.type)
 
-    // 立即跳转
-    router.push(`/flow?file=${encodeURIComponent(file.name)}&t=${Date.now()}&pending=1`)
+    // 显示全屏上传进度
+    setUploadPct(0)
 
-    // 后台静默上传
     const formData = new FormData()
     formData.append('file', file)
     const xhr = new XMLHttpRequest()
-  xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        const pct = Math.round((e.loaded / e.total) * 100)
-        setUploadPct(pct)
-        localStorage.setItem('lw_upload_pct', String(pct))
-      }
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) setUploadPct(Math.round((e.loaded / e.total) * 100))
     }
     xhr.onload = () => {
       try {
@@ -40,19 +31,16 @@ export default function Home() {
         if (data.success) {
           localStorage.setItem('lw_file_id', data.file_id)
           if (data.file_path) localStorage.setItem('lw_file_path', data.file_path)
-          localStorage.setItem('lw_upload_done', '1')
+          setUploadPct(100)
+          // 上传完成后再跳转（无等待）
+          setTimeout(() => router.push(`/flow?file=${encodeURIComponent(file.name)}&t=${Date.now()}`), 200)
         } else {
-          localStorage.setItem('lw_upload_error', data.error || '上传失败')
+          setErrorMsg(data.error || '上传失败')
+          setUploadPct(-1)
         }
-      } catch {
-        localStorage.setItem('lw_upload_error', '上传响应解析失败')
-      }
-      setIsTransitioning(false)
+      } catch { setErrorMsg('上传响应解析失败'); setUploadPct(-1) }
     }
-    xhr.onerror = () => {
-      localStorage.setItem('lw_upload_error', '网络错误')
-      setIsTransitioning(false)
-    }
+    xhr.onerror = () => { setErrorMsg('网络错误，请检查连接后重试'); setUploadPct(-1) }
     xhr.open('POST', '/api/upload')
     xhr.send(formData)
   }
@@ -73,14 +61,20 @@ export default function Home() {
   const onDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragActive(false) }
   const uploading = uploadPct >= 0
 
-  if (isTransitioning) {
+  // 上传中：全屏动画
+  if (uploading) {
     return (
-      <div style={{ minHeight: '100vh', background: '#FFFFFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #F0F0F0', borderTopColor: '#0071E3', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
-          <p style={{ fontSize: 15, color: '#86868B' }}>准备中...</p>
-          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <div style={{ minHeight: '100vh', background: '#FFFFFF', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
+        <div style={{ textAlign: 'center', padding: '0 24px' }}>
+          <div style={{ width: 48, height: 48, borderRadius: '50%', border: '3px solid #F0F0F0', borderTopColor: '#0071E3', animation: 'spin 0.8s linear infinite', margin: '0 auto 24px' }} />
+          <h2 style={{ fontSize: '20px', fontWeight: 700, color: '#1D1D1F', marginBottom: '8px' }}>文件上传中</h2>
+          <p style={{ fontSize: '14px', color: '#86868B', marginBottom: '24px', minHeight: 20 }}>{uploadPct < 100 ? '上传完成后自动进入分析' : '正在跳转...'}</p>
+          <div style={{ width: 280, height: 4, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden', margin: '0 auto' }}>
+            <motion.div style={{ height: '100%', background: '#0071E3', borderRadius: 2 }} animate={{ width: `${uploadPct}%` }} transition={{ duration: 0.15 }} />
+          </div>
+          <p style={{ fontSize: '22px', fontWeight: 700, color: '#0071E3', marginTop: '12px' }}>{uploadPct}%</p>
         </div>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     )
   }
@@ -110,7 +104,7 @@ export default function Home() {
           {errorMsg && (
             <motion.div
               initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
+              animate={{ opacity: 1, y: 0, height: 'auto' }}
               exit={{ opacity: 0, height: 0, marginBottom: 0 }}
               style={{
                 margin: '0 0 16px',
@@ -121,7 +115,8 @@ export default function Home() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                gap: 12
+                gap: 12,
+                overflow: 'hidden'
               }}
             >
               <span style={{ fontSize: 14, color: '#D93025', fontWeight: 500 }}>{errorMsg}</span>
@@ -159,7 +154,7 @@ export default function Home() {
         <p style={{ fontSize: '13px', fontWeight: 600, color: '#0071E3', textAlign: 'center', marginBottom: '24px' }}>处理流程</p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', maxWidth: '480px', margin: '0 auto' }}>
           {[
-            { step: '01', title: '文件上传', desc: '秒级完成' },
+            { step: '01', title: '文件上传', desc: '支持扫描件' },
             { step: '02', title: 'AI 法律分析', desc: '提取案件要素' },
             { step: '03', title: '生成上诉状', desc: '规范的文书格式' },
             { step: '04', title: '导出与编辑', desc: '支持编辑导出' },

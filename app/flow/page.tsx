@@ -66,15 +66,12 @@ export default function FlowPage() {
   }
 
   async function processFile() {
-    if (!fileIdRef.current) {
-      // 后台上传还没完成，等useEffect的轮询结果
-      return
-    }
     if (processRef.current) return
     processRef.current = true
+
     setStepStatus(0, 'done', 100, '完成')
 
-    // 步骤1: OCR
+    // OCR
     setStepStatus(1, 'active', 10, '正在识别文档...')
     try {
       const ocrRes = await callApi('/api/ocr', { file_id: fileIdRef.current })
@@ -88,7 +85,7 @@ export default function FlowPage() {
       setStepStatus(1, 'error', 0, err.message); setError(`OCR 识别失败: ${err.message}`); return
     }
 
-    // 步骤2: AI 分析
+    // AI 分析
     setStepStatus(2, 'active', 10, '正在提取案件信息...')
     try {
       const analyzeRes = await callApi('/api/analyze', { text: ocrTextRef.current })
@@ -108,41 +105,12 @@ export default function FlowPage() {
   }
 
   useEffect(() => {
-    const fname = localStorage.getItem('lw_file_name') || search.get('file') || ''
-    setFileName(fname)
-
     const fid = localStorage.getItem('lw_file_id') || ''
-    if (!fid) {
-      // 后台上传模式：等待lw_upload_done标志出现
-      const uploadCheck = setInterval(() => {
-        const uploadDone = localStorage.getItem('lw_upload_done')
-        const uploadError = localStorage.getItem('lw_upload_error')
-        if (uploadDone) {
-          clearInterval(uploadCheck)
-          const newFid = localStorage.getItem('lw_file_id') || ''
-          if (newFid) {
-            fileIdRef.current = newFid
-            const t = setTimeout(() => processFile(), 300)
-          } else {
-            setError('上传完成但未获取文件ID')
-          }
-        } else if (uploadError) {
-          clearInterval(uploadCheck)
-          localStorage.removeItem('lw_upload_error')
-          setError(`上传失败: ${uploadError}`)
-        }
-      }, 300)
-      // 30秒超时
-      setTimeout(() => {
-        clearInterval(uploadCheck)
-        if (!fileIdRef.current && !error) setError('上传超时，请重试')
-      }, 30000)
-      return () => { clearInterval(uploadCheck); if (countdownRef.current) clearInterval(countdownRef.current); abortRef.current?.abort() }
-    } else {
-      fileIdRef.current = fid
-      const t = setTimeout(() => processFile(), 300)
-      return () => { clearTimeout(t); if (countdownRef.current) clearInterval(countdownRef.current); abortRef.current?.abort() }
-    }
+    const fname = localStorage.getItem('lw_file_name') || search.get('file') || ''
+    fileIdRef.current = fid; setFileName(fname)
+    if (!fid) { router.push('/'); return }
+    const t = setTimeout(() => processFile(), 300)
+    return () => { clearTimeout(t); if (countdownRef.current) clearInterval(countdownRef.current); abortRef.current?.abort() }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -164,7 +132,7 @@ export default function FlowPage() {
               {i < steps.length - 1 && <div style={{ position: 'absolute', top: 12, left: '50%', right: 0, height: 2, background: steps[i + 1]?.status === 'done' ? '#0071E3' : '#E8E8ED' }} />}
               <div style={{ width: 24, height: 24, borderRadius: '50%', zIndex: 1, background: step.status === 'done' ? '#0071E3' : step.status === 'active' ? '#E8F0FE' : step.status === 'error' ? '#FCE8E6' : '#F1F3F4', display: 'flex', alignItems: 'center', justifyContent: 'center', border: step.status === 'active' ? '2px solid #0071E3' : 'none', transition: 'all 0.3s' }}>
                 {step.status === 'active' && <div style={{ width: 10, height: 10, borderRadius: '50%', border: '2px solid #0071E3', borderTopColor: 'transparent', animation: 'spin 1s linear infinite' }} />}
-                {step.status === 'done' && <span style={{ color: '#FFF', fontSize: 11, fontWeight: 600 }}></span>}
+                {step.status === 'done' && <span style={{ color: '#FFF', fontSize: 11, fontWeight: 600 }}>✓</span>}
                 {step.status === 'error' && <span style={{ color: '#D93025', fontSize: 11, fontWeight: 600 }}>!</span>}
                 {step.status === 'pending' && <span style={{ color: '#86868B', fontSize: 11, fontWeight: 500 }}>{i + 1}</span>}
               </div>
@@ -188,7 +156,7 @@ export default function FlowPage() {
             <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: 14, paddingBottom: i < steps.length - 1 ? 14 : 0, opacity: step.status === 'pending' ? 0.5 : 1 }}>
               <div style={{ width: 28, height: 28, borderRadius: '50%', background: step.status === 'done' ? '#0071E3' : step.status === 'active' ? '#E8F0FE' : '#F1F3F4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                 {step.status === 'active' && <div style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #0071E3', borderTopColor: 'transparent', animation: 'spin 1s linear infinite' }} />}
-                {step.status === 'done' && <span style={{ color: '#FFF', fontSize: 12, fontWeight: 600 }}></span>}
+                {step.status === 'done' && <span style={{ color: '#FFF', fontSize: 12, fontWeight: 600 }}>✓</span>}
                 {step.status === 'error' && <span style={{ color: '#D93025', fontSize: 12, fontWeight: 600 }}>!</span>}
                 {step.status === 'pending' && <span style={{ color: '#86868B', fontSize: 12 }}>{i + 1}</span>}
               </div>
@@ -241,8 +209,8 @@ export default function FlowPage() {
           </div>
         )}
 
-        {/* 分析完成后继续按钮 */}
-        {analyzeInfo && Object.keys(analyzeInfo).length > 0 && !error && (
+        {/* 继续按钮 */}
+        {Object.keys(analyzeInfo).length > 0 && !error && (
           <button
             onClick={goToConfirm}
             style={{ marginTop: 16, width: '100%', padding: '14px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: '15px', fontWeight: 600, minHeight: 48, boxShadow: '0 2px 8px rgba(0,113,227,0.3)' }}
