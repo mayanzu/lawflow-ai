@@ -26,44 +26,42 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const stream = await new Promise<Response>((resolve, reject) => {
+    const res = await new Promise<Response>((resolve, reject) => {
       const proxyReq = http.request(options, (proxyRes) => {
-        // 将 Node.js IncomingMessage 转换为 Web ReadableStream
-        const reader = proxyRes[Symbol.asyncIterator]
-          ? proxyRes[Symbol.asyncIterator]()
-          : null
+        const encoder = new TextEncoder()
+        let settled = false
 
-        let cancelled = false
-        const stream = new ReadableStream({
-          async pull(controller) {
-            if (cancelled || !reader) {
-              controller.close()
-              return
-            }
-            try {
-              const { value, done } = await reader.next()
-              if (done) {
-                controller.close()
-              } else {
-                controller.enqueue(value)
+        const webStream = new ReadableStream({
+          start(controller) {
+            proxyRes.on('data', (chunk: Buffer) => {
+              if (!settled) {
+                try {
+                  controller.enqueue(chunk)
+                } catch {
+                  settled = true
+                }
               }
-            } catch (err) {
-              controller.error(err)
-            }
+            })
+            proxyRes.on('end', () => {
+              settled = true
+              try { controller.close() } catch {}
+            })
+            proxyRes.on('error', (err) => {
+              settled = true
+              try { controller.error(err) } catch {}
+            })
           },
           cancel() {
-            cancelled = true
             proxyReq.destroy()
           },
         })
 
         resolve(
-          new Response(stream, {
+          new Response(webStream, {
             status: proxyRes.statusCode || 200,
             headers: {
               'Content-Type': 'text/event-stream; charset=utf-8',
               'Cache-Control': 'no-cache, no-transform',
-              'Connection': 'keep-alive',
               'X-Accel-Buffering': 'no',
               'Access-Control-Allow-Origin': '*',
             },
@@ -79,7 +77,7 @@ export async function POST(req: NextRequest) {
       proxyReq.end()
     })
 
-    return stream
+    return res
   } catch (err: any) {
     return new Response(
       `data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`,

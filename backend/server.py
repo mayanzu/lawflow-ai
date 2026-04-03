@@ -30,12 +30,20 @@ def _cleanup_old_uploads(days=7):
         pass
 
 import shutil
+import threading
 _paddle_ocr = None
+_paddle_ocr_lock = threading.Lock()
+
 def _get_ocr():
     global _paddle_ocr
     if _paddle_ocr is None:
-        from paddleocr import PaddleOCR
-        _paddle_ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
+        with _paddle_ocr_lock:
+            if _paddle_ocr is None:
+                try:
+                    from paddleocr import PaddleOCR
+                    _paddle_ocr = PaddleOCR(use_textline_orientation=True, lang='ch')
+                except ImportError as e:
+                    print(f"[OCR] PaddleOCR unavailable: {e}", flush=True)
     return _paddle_ocr
 
 def _call_ai_stream(prompt, system="", retries=2, callback=None):
@@ -463,4 +471,5 @@ class Handler(ThreadedHandler):
 
 if __name__ == "__main__":
     print(f"AI Backend ({OPENROUTER_MODEL}): http://localhost:3457", flush=True)
+    # 懒加载 OCR（首次请求时初始化，避免启动阻塞）
     ThreadedTCPServer(("0.0.0.0", 3457), Handler).serve_forever()
