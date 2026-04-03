@@ -141,12 +141,41 @@ export default function FlowPage() {
   }
 
   useEffect(() => {
-    const fid = localStorage.getItem('lw_file_id') || ''
     const fname = localStorage.getItem('lw_file_name') || search.get('file') || ''
-    fileIdRef.current = fid; setFileName(fname)
-    if (!fid) { router.push('/'); return }
-    const t = setTimeout(() => processFile(), 300)
-    return () => { clearTimeout(t); if (countdownRef.current) clearInterval(countdownRef.current); abortRef.current?.abort() }
+    setFileName(fname)
+
+    const fid = localStorage.getItem('lw_file_id') || ''
+    if (!fid) {
+      // 后台上传模式：等待lw_upload_done标志出现
+      const uploadCheck = setInterval(() => {
+        const uploadDone = localStorage.getItem('lw_upload_done')
+        const uploadError = localStorage.getItem('lw_upload_error')
+        if (uploadDone) {
+          clearInterval(uploadCheck)
+          const newFid = localStorage.getItem('lw_file_id') || ''
+          if (newFid) {
+            fileIdRef.current = newFid
+            const t = setTimeout(() => processFile(), 300)
+          } else {
+            setError('上传完成但未获取文件ID')
+          }
+        } else if (uploadError) {
+          clearInterval(uploadCheck)
+          localStorage.removeItem('lw_upload_error')
+          setError(`上传失败: ${uploadError}`)
+        }
+      }, 300)
+      // 30秒超时
+      setTimeout(() => {
+        clearInterval(uploadCheck)
+        if (!fileIdRef.current && !error) setError('上传超时，请重试')
+      }, 30000)
+      return () => { clearInterval(uploadCheck); if (countdownRef.current) clearInterval(countdownRef.current); abortRef.current?.abort() }
+    } else {
+      fileIdRef.current = fid
+      const t = setTimeout(() => processFile(), 300)
+      return () => { clearTimeout(t); if (countdownRef.current) clearInterval(countdownRef.current); abortRef.current?.abort() }
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
