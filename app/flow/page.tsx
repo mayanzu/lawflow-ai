@@ -66,17 +66,13 @@ export default function FlowPage() {
   }
 
   async function processFile() {
-    if (processRef.current) return
-    processRef.current = true
-
-    // 步骤0: 上传（如果是后台上传模式）
     if (!fileIdRef.current) {
-      setStepStatus(0, 'active', 0, '正在上传...')
+      // 后台上传还没完成，等useEffect的轮询结果
       return
     }
-    if (!processRef.current) {
-      setStepStatus(0, 'done', 100, '完成')
-    }
+    if (processRef.current) return
+    processRef.current = true
+    setStepStatus(0, 'done', 100, '完成')
 
     // 步骤1: OCR
     setStepStatus(1, 'active', 10, '正在识别文档...')
