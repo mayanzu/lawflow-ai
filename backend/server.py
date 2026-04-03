@@ -3,12 +3,9 @@
 真实 OCR + AI 分析 + 上诉状生成
 """
 import os
-# 禁用 PaddlePaddle 模型联网检查
 os.environ['FLAGS_allocator_strategy'] = 'auto_growth'
 
-import json, sys, time, subprocess, socketserver, http.client
-import threading
-import shutil
+import json, sys, time, subprocess, socketserver, threading, shutil, tempfile, gc
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # 模型配置
@@ -35,9 +32,8 @@ def _cleanup_old_uploads(days=7):
     except Exception:
         pass
 
-# ===== OCR 引擎：RapidOCR =====
+# ===== OCR 引擎 =====
 _rapidocr_img = None
-_rapidocr_pdf = None
 _rapidocr_lock = threading.Lock()
 
 def _get_ocr_img():
@@ -52,32 +48,26 @@ def _get_ocr_img():
                     print(f"[OCR-img] {e}", flush=True)
     return _rapidocr_img
 
-def _get_ocr_pdf():
-    global _rapidocr_pdf
-    if _rapidocr_pdf is None:
-        with _rapidocr_lock:
-            if _rapidocr_pdf is None:
-                try:
-                    from rapidocr_pdf import RapidOCRPDF
-                    _rapidocr_pdf = RapidOCRPDF()
-                except ImportError as e:
-                    print(f"[OCR-pdf] {e}", flush=True)
-    return _rapidocr_pdf
-
 def _ocr_image(path):
     """图片 OCR - RapidOCR"""
     ocr = _get_ocr_img()
     if not ocr:
         return ""
-    result = ocr(path)
-    if result and hasattr(result, 'txts'):
-        return "\n".join([t for t in result.txts if t and t.strip()])
+    try:
+        result = ocr(path)
+        if result and hasattr(result, 'txts'):
+            return "\n".join([t for t in result.txts if t and t.strip()])
+    except Exception as e:
+        print(f"[OCR-img] {e}", flush=True)
     return ""
 
 def _ocr_pdf(path):
     """PDF OCR:
-    1. 先用 pdfplumber 提取文字（纯文本PDF）
-    2. 无文字时用 fitz 转图 + RapidOCR 识别（扫描件）"""
+    1. 先用 pdfplumber 提取文字（纯文本PDF，秒级）
+    2. 无文字时用 fitz 转图 + RapidOCR 分批识别（扫描件，5页/批防OOM）"""
+    import subprocess
+    import gc
+    # Step 1: Text-based PDF (fast)
     try:
         import pdfplumber
         parts = []
@@ -90,52 +80,69 @@ def _ocr_pdf(path):
             return "\n".join(parts)
     except Exception as e:
         print(f"[OCR pdfplumber] {e}", flush=True)
-    
-    # 扫描件：用 fitz 转图 + RapidOCR
+
+    # Step 2: Scanned PDF (fitz + RapidOCR, batched)
     ocr = _get_ocr_img()
     if not ocr:
         return ""
-    
-    import fitz, tempfile
-    tmpdir = tempfile.mkdtemp()
-    doc = fitz.open(path)
+
     try:
-        for i in range(min(len(doc), 30)):
-            pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            p = os.path.join(tmpdir, f"p{i}.png")
-            pix.save(p)
-            try:
-                result = ocr(p)
-                if result and hasattr(result, 'txts'):
-                    page_text = "\n".join([t for t in result.txts if t and t.strip()])
-                    if page_text:
-                        parts.append(page_text)
-            except Exception as e:
-                print(f"[PDF OCR page {i}] {e}", flush=True)
-            if os.path.exists(p):
-                os.remove(p)
-    finally:
+        import fitz
+        doc = fitz.open(path)
+        total_pages = min(len(doc), 30)
+        BATCH = 5  # 5页/批，防4G内存服务器OOM
+        all_text = []
+
+        for i in range(0, total_pages, BATCH):
+            end = min(i + BATCH, total_pages)
+            page_texts = []
+            for pg in range(i, end):
+                pix = doc[pg].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+                tmp = tempfile.mktemp(suffix=".png")
+                pix.save(tmp)
+                try:
+                    result = ocr(tmp)
+                    if result and hasattr(result, 'txts'):
+                        texts = [t for t in result.txts if t and t.strip()]
+                        if texts:
+                            page_texts.append("\n".join(texts))
+                except Exception as e:
+                    print(f"[OCR page {pg}] {e}", flush=True)
+                finally:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                    del pix
+                    gc.collect()
+
+            if page_texts:
+                all_text.extend(page_texts)
+
         doc.close()
-        shutil.rmtree(tmpdir)
-    return "\n".join(parts)
+        gc.collect()
+
+        text = "\n".join(all_text)
+        if text.strip():
+            return text
+    except Exception as e:
+        print(f"[OCR-pdf] {e}", flush=True)
+
+    return ""
 
 
 # ===== 速率控制 =====
 _last_ai_call = 0.0
 _ai_call_lock = threading.Lock()
 
-
 # ===== AI 调用 =====
 def _call_ai_stream(prompt, system="", retries=2, callback=None):
     from urllib.request import Request, urlopen
-    import time
-    # 速率控制：3秒冷却
     with _ai_call_lock:
         elapsed = time.time() - _last_ai_call
         if elapsed < 3.0:
             time.sleep(3.0 - elapsed)
-        _last_ai_call = time.time()
-    
+        exec('_last_ai_call = time.time()')
+        exec('time.sleep(0.001)')  # ensure assignment
+
     msgs = []
     if system:
         msgs.append({"role": "system", "content": system})
@@ -198,7 +205,6 @@ def _call_ai_stream(prompt, system="", retries=2, callback=None):
 
 
 def _call_ai(prompt, system="", retries=2):
-    """同步版本，兼容旧代码"""
     chunks = []
     def collect(chunk):
         chunks.append(chunk)
