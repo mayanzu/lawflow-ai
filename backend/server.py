@@ -43,13 +43,7 @@ def _get_ocr_img():
             if _rapidocr_img is None:
                 try:
                     from rapidocr import RapidOCR
-                    # 低资源环境精确度优化参数
-                    _rapidocr_img = RapidOCR(
-                        det_limit_side_len=1280,      # 默认960 → 1280 减少小字漏检
-                        det_unclip_ratio=1.8,          # 默认1.5 → 1.8 文本框更宽泛
-                        rec_score=0.4,                 # 降过滤阈值保留模糊字
-                        det_score=0.4,                 # 降检测阈值
-                    )
+                    _rapidocr_img = RapidOCR()
                 except ImportError as e:
                     print(f"[OCR-img] {e}", flush=True)
     return _rapidocr_img
@@ -436,13 +430,17 @@ class Handler(ThreadedHandler):
             return {"success": False, "error": "File not found"}
         ext = os.path.splitext(path)[1].lower()
         text = ""
-        if ext == ".pdf":
-            text = _ocr_pdf(path)
-        elif ext in (".png",".jpg",".jpeg",".bmp"):
-            text = _ocr_image(path)
-        else:
-            with open(path, "r", errors="ignore") as f:
-                text = f.read()
+        try:
+            if ext == ".pdf":
+                text = _ocr_pdf(path)
+            elif ext in (".png",".jpg",".jpeg",".bmp"):
+                text = _ocr_image(path)
+            else:
+                with open(path, "r", errors="ignore") as f:
+                    text = f.read()
+        except Exception as e:
+            print(f"[OCR route error] {e}", flush=True)
+            return {"success": False, "error": f"OCR failed: {e}"}
         if not text or len(text.strip()) < 10:
             return {"success": False, "error": "Could not extract text"}
         return {"success": True, "text": text, "length": len(text)}
