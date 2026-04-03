@@ -140,34 +140,56 @@ def _ocr_pdf(path):
     except Exception as e:
         print(f"[OCR pdfplumber] {e}", flush=True)
     if parts: return "\n".join(parts)
-    ocr = _get_ocr()
-    doc = None
+    # 扫描件PDF用Tesseract逐页OCR
+    import subprocess
+    doc = fitz.open(path)
     tmpdir = tempfile.mkdtemp()
     try:
-        doc = fitz.open(path)
         for i in range(min(len(doc), 30)):
-            pix = doc[i].get_pixmap(matrix=fitz.Matrix(2, 2))
+            pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
             p = os.path.join(tmpdir, f"p{i}.png")
             pix.save(p)
-            res = ocr.ocr(p, cls=True)
-            for line in res:
-                if line:
-                    for w in line:
-                        parts.append(w[1][0])
-            os.remove(p)
+            try:
+                result = subprocess.run(
+                    ["tesseract", p, "stdout", "-l", "chi_sim+eng"],
+                    capture_output=True, text=True, timeout=20
+                )
+                if result.returncode == 0:
+                    parts.append(result.stdout.strip())
+            except Exception as e:
+                print(f"[PDF OCR page {i}] {e}", flush=True)
+            if __import__("os").path.exists(p):
+                __import__("os").remove(p)
     finally:
-        if doc:
-            doc.close()
-        if tmpdir:
-            shutil.rmtree(tmpdir)
+        doc.close()
+        __import__("shutil").rmtree(tmpdir)
     return "\n".join(parts)
 
 def _ocr_image(path):
-    ocr, parts = _get_ocr(), []
-    res = ocr.ocr(path, cls=True)
-    for line in res:
-        if line:
-            for w in line: parts.append(w[1][0])
+    """图片OCR - Tesseract，轻量稳定"""
+    import subprocess
+    parts = []
+    try:
+        result = subprocess.run(
+            ["tesseract", path, "stdout", "-l", "chi_sim+eng"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            parts = result.stdout.split("\n")
+    except Exception as e:
+        print(f"[OCR tesseract] {e}", flush=True)
+    if not parts or len("".join(parts).strip()) < 10:
+        ocr = _get_ocr()
+        if ocr:
+            try:
+                res = ocr.predict(path)
+                for page in res:
+                    if hasattr(page, "rec_texts") and page.rec_texts:
+                        parts.extend(page.rec_texts)
+                    elif isinstance(page, dict) and "rec_texts" in page:
+                        parts.extend(page["rec_texts"])
+            except Exception as e:
+                print(f"[OCR fallback] {e}", flush=True)
     return "\n".join(parts)
 
 class ThreadedHandler(BaseHTTPRequestHandler):

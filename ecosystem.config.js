@@ -9,7 +9,8 @@ module.exports = {
       instances: 1,
       autorestart: true,
       max_restarts: 10,
-      min_uptime: 10000,
+      min_uptime: 30000,
+      restart_delay: 4000,
       watch: false,
       env: {
         PYTHONUNBUFFERED: '1'
