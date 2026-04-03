@@ -168,6 +168,8 @@ export default function ConfirmPage() {
                   localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis))
                 setStreamDone(true)
                 setGenerating(false)
+                // 生成完成，2秒后自动跳转结果页
+                setTimeout(() => router.push('/result'), 2000)
                 return
               } else if (data.type === 'error') {
                 setError(data.error)
@@ -270,7 +272,7 @@ export default function ConfirmPage() {
               </div>
               <div style={{ background: '#FFF', borderRadius: 14, padding: '20px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
                 <div style={{ fontSize: 13, color: '#86868B', marginBottom: 12, lineHeight: 1.5 }}>
-                  {streamDone ? '上诉状已生成，点击按钮查看结果' : '内容逐字显示中...'}
+                  {streamDone ? '上诉状已生成，即将跳转结果页...' : '内容逐字显示中...'}
                 </div>
                 <div style={{ fontSize: 14, lineHeight: 1.9, color: '#1D1D1F', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: '60vh', overflow: 'auto' }}>
                   {streamingText}
