@@ -1,8 +1,12 @@
 """
 诉状助手 - AI 后端服务（qwen 模型）
-真实 PaddleOCR + AI 分析 + 上诉状生成
+真实 OCR + AI 分析 + 上诉状生成
 """
-import json, os, sys, time, subprocess, socketserver, http.client
+import os
+# 禁用 PaddlePaddle 模型联网检查
+os.environ['FLAGS_allocator_strategy'] = 'auto_growth'
+
+import json, sys, time, subprocess, socketserver, http.client
 import threading
 import shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -31,36 +35,110 @@ def _cleanup_old_uploads(days=7):
     except Exception:
         pass
 
-_paddle_ocr = None
-_paddle_ocr_lock = threading.Lock()
+# ===== OCR 引擎：RapidOCR =====
+_rapidocr_img = None
+_rapidocr_pdf = None
+_rapidocr_lock = threading.Lock()
 
-# 速率控制
+def _get_ocr_img():
+    global _rapidocr_img
+    if _rapidocr_img is None:
+        with _rapidocr_lock:
+            if _rapidocr_img is None:
+                try:
+                    from rapidocr import RapidOCR
+                    _rapidocr_img = RapidOCR()
+                except ImportError as e:
+                    print(f"[OCR-img] {e}", flush=True)
+    return _rapidocr_img
+
+def _get_ocr_pdf():
+    global _rapidocr_pdf
+    if _rapidocr_pdf is None:
+        with _rapidocr_lock:
+            if _rapidocr_pdf is None:
+                try:
+                    from rapidocr_pdf import RapidOCRPDF
+                    _rapidocr_pdf = RapidOCRPDF()
+                except ImportError as e:
+                    print(f"[OCR-pdf] {e}", flush=True)
+    return _rapidocr_pdf
+
+def _ocr_image(path):
+    """图片 OCR - RapidOCR"""
+    ocr = _get_ocr_img()
+    if not ocr:
+        return ""
+    result = ocr(path)
+    if result and hasattr(result, 'txts'):
+        return "\n".join([t for t in result.txts if t and t.strip()])
+    return ""
+
+def _ocr_pdf(path):
+    """PDF OCR:
+    1. 先用 pdfplumber 提取文字（纯文本PDF）
+    2. 无文字时用 fitz 转图 + RapidOCR 识别（扫描件）"""
+    try:
+        import pdfplumber
+        parts = []
+        with pdfplumber.open(path) as pdf:
+            for pg in pdf.pages:
+                t = pg.extract_text()
+                if t and len(t.strip()) > 10:
+                    parts.append(t)
+        if parts:
+            return "\n".join(parts)
+    except Exception as e:
+        print(f"[OCR pdfplumber] {e}", flush=True)
+    
+    # 扫描件：用 fitz 转图 + RapidOCR
+    ocr = _get_ocr_img()
+    if not ocr:
+        return ""
+    
+    import fitz, tempfile
+    tmpdir = tempfile.mkdtemp()
+    doc = fitz.open(path)
+    try:
+        for i in range(min(len(doc), 30)):
+            pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+            p = os.path.join(tmpdir, f"p{i}.png")
+            pix.save(p)
+            try:
+                result = ocr(p)
+                if result and hasattr(result, 'txts'):
+                    page_text = "\n".join([t for t in result.txts if t and t.strip()])
+                    if page_text:
+                        parts.append(page_text)
+            except Exception as e:
+                print(f"[PDF OCR page {i}] {e}", flush=True)
+            if os.path.exists(p):
+                os.remove(p)
+    finally:
+        doc.close()
+        shutil.rmtree(tmpdir)
+    return "\n".join(parts)
+
+
+# ===== 速率控制 =====
 _last_ai_call = 0.0
 _ai_call_lock = threading.Lock()
 
-def _get_ocr():
-    global _paddle_ocr
-    if _paddle_ocr is None:
-        with _paddle_ocr_lock:
-            if _paddle_ocr is None:
-                try:
-                    from paddleocr import PaddleOCR
-                    _paddle_ocr = PaddleOCR(use_textline_orientation=True, lang='ch')
-                except ImportError as e:
-                    print(f"[OCR] PaddleOCR unavailable: {e}", flush=True)
-    return _paddle_ocr
 
+# ===== AI 调用 =====
 def _call_ai_stream(prompt, system="", retries=2, callback=None):
     from urllib.request import Request, urlopen
     import time
-    global _last_ai_call
+    # 速率控制：3秒冷却
     with _ai_call_lock:
         elapsed = time.time() - _last_ai_call
         if elapsed < 3.0:
             time.sleep(3.0 - elapsed)
         _last_ai_call = time.time()
+    
     msgs = []
-    if system: msgs.append({"role": "system", "content": system})
+    if system:
+        msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
     body = json.dumps({"model": OPENROUTER_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25, "stream": True})
     last_err = ""
@@ -74,7 +152,6 @@ def _call_ai_stream(prompt, system="", retries=2, callback=None):
             while True:
                 chunk = resp.read(8192)
                 if not chunk:
-                    # 处理剩余buffer
                     if buffer:
                         buf_str = buffer.decode("utf-8", errors="ignore")
                         for line in buf_str.split("\n"):
@@ -90,14 +167,14 @@ def _call_ai_stream(prompt, system="", retries=2, callback=None):
                                         pass
                     break
                 buffer += chunk
-                # 按 \n\n 分隔SSE事件，逐个处理
                 while b"\n\n" in buffer:
                     event, buffer = buffer.split(b"\n\n", 1)
                     event_str = event.decode("utf-8", errors="ignore")
                     if event_str.startswith("data: "):
                         data_str = event_str[6:].strip()
                         if data_str == "[DONE]":
-                            if callback: callback("")
+                            if callback:
+                                callback("")
                             return
                         if data_str:
                             try:
@@ -119,6 +196,7 @@ def _call_ai_stream(prompt, system="", retries=2, callback=None):
     if callback:
         callback(f"[AI 调用失败: {last_err}]")
 
+
 def _call_ai(prompt, system="", retries=2):
     """同步版本，兼容旧代码"""
     chunks = []
@@ -127,76 +205,13 @@ def _call_ai(prompt, system="", retries=2):
     _call_ai_stream(prompt, system, retries, callback=collect)
     return "".join(chunks)
 
-def _ocr_pdf(path):
-    import pdfplumber
-    import fitz, tempfile
-    parts = []
-    tmpdir = None
-    try:
-        with pdfplumber.open(path) as pdf:
-            for pg in pdf.pages:
-                t = pg.extract_text()
-                if t and len(t.strip()) > 10: parts.append(t)
-    except Exception as e:
-        print(f"[OCR pdfplumber] {e}", flush=True)
-    if parts: return "\n".join(parts)
-    # 扫描件PDF用Tesseract逐页OCR
-    import subprocess
-    doc = fitz.open(path)
-    tmpdir = tempfile.mkdtemp()
-    try:
-        for i in range(min(len(doc), 30)):
-            pix = doc[i].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
-            p = os.path.join(tmpdir, f"p{i}.png")
-            pix.save(p)
-            try:
-                result = subprocess.run(
-                    ["tesseract", p, "stdout", "-l", "chi_sim+eng"],
-                    capture_output=True, text=True, timeout=20
-                )
-                if result.returncode == 0:
-                    parts.append(result.stdout.strip())
-            except Exception as e:
-                print(f"[PDF OCR page {i}] {e}", flush=True)
-            if __import__("os").path.exists(p):
-                __import__("os").remove(p)
-    finally:
-        doc.close()
-        __import__("shutil").rmtree(tmpdir)
-    return "\n".join(parts)
 
-def _ocr_image(path):
-    """图片OCR - Tesseract，轻量稳定"""
-    import subprocess
-    parts = []
-    try:
-        result = subprocess.run(
-            ["tesseract", path, "stdout", "-l", "chi_sim+eng"],
-            capture_output=True, text=True, timeout=30
-        )
-        if result.returncode == 0:
-            parts = result.stdout.split("\n")
-    except Exception as e:
-        print(f"[OCR tesseract] {e}", flush=True)
-    if not parts or len("".join(parts).strip()) < 10:
-        ocr = _get_ocr()
-        if ocr:
-            try:
-                res = ocr.predict(path)
-                for page in res:
-                    if hasattr(page, "rec_texts") and page.rec_texts:
-                        parts.extend(page.rec_texts)
-                    elif isinstance(page, dict) and "rec_texts" in page:
-                        parts.extend(page["rec_texts"])
-            except Exception as e:
-                print(f"[OCR fallback] {e}", flush=True)
-    return "\n".join(parts)
-
+# ===== HTTP 服务器 =====
 class ThreadedHandler(BaseHTTPRequestHandler):
     daemon_threads = True
-    timeout = 60  # 请求超时60秒
-    max_empty_requests = 3
-    def log_message(self, *args): pass  # 关闭日志
+    timeout = 60
+    def log_message(self, *args):
+        pass
 
 class ThreadedTCPServer(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
@@ -213,19 +228,18 @@ class Handler(ThreadedHandler):
         self.end_headers()
 
     def do_POST(self):
-        # 每次请求清理7天前上传的文件
         _cleanup_old_uploads()
         ct = self.headers.get("Content-Type", "")
         if "multipart/form-data" in ct:
             n = int(self.headers.get("Content-Length", 0))
-            if n > 50 * 1024 * 1024:  # 限制50MB
+            if n > 50 * 1024 * 1024:
                 self.send_error(413, "Request body too large")
                 return
             raw = self.rfile.read(n)
             res = self._upload_file(raw, ct)
         else:
             n = int(self.headers.get("Content-Length", 0))
-            if n > 10 * 1024 * 1024:  # JSON body 限制10MB
+            if n > 10 * 1024 * 1024:
                 self.send_error(413, "Request body too large")
                 return
             try:
@@ -234,14 +248,19 @@ class Handler(ThreadedHandler):
                 self.send_error(400, f"Invalid JSON: {e}")
                 return
             p = self.path.split("?")[0]
-            if p == "/ocr": res = self._ocr(body)
-            elif p == "/analyze": res = self._analyze(body)
-            elif p == "/generate-appeal": res = self._generate(body)
+            if p == "/ocr":
+                res = self._ocr(body)
+            elif p == "/analyze":
+                res = self._analyze(body)
+            elif p == "/generate-appeal":
+                res = self._generate(body)
             elif p == "/generate-appeal-stream":
                 self._generate_stream(body)
                 return
-            elif p == "/upload": res = self._upload_json(body)
-            else: res = {"success": False, "error": "Unknown"}
+            elif p == "/upload":
+                res = self._upload_json(body)
+            else:
+                res = {"success": False, "error": "Unknown"}
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -258,11 +277,13 @@ class Handler(ThreadedHandler):
                     fd = fd.split(b"\r\n--")[0].split(b"--")[0].rstrip(b"\r\n")
                     fname = "upload"
                     for l in hd.split("\r\n"):
-                        if "filename=" in l: fname = l.split("filename=")[1].strip('"')
+                        if "filename=" in l:
+                            fname = l.split("filename=")[1].strip('"')
                     fid = f"file_{int(time.time())}_{os.urandom(3).hex()}"
                     ext = os.path.splitext(fname)[1] or ".pdf"
                     path = os.path.join(UPLOAD_DIR, fid + ext)
-                    with open(path, "wb") as f: f.write(fd)
+                    with open(path, "wb") as f:
+                        f.write(fd)
                     return {"success": True, "file_id": fid, "file_path": path, "file_name": fname, "file_size": len(fd)}
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -276,7 +297,8 @@ class Handler(ThreadedHandler):
             fid = f"file_{int(time.time())}_{os.urandom(3).hex()}"
             ext = os.path.splitext(fn)[1] or ".pdf"
             path = os.path.join(UPLOAD_DIR, fid + ext)
-            with open(path, "wb") as f: f.write(fb)
+            with open(path, "wb") as f:
+                f.write(fb)
             return {"success": True, "file_id": fid, "file_path": path, "file_name": fn}
         return {"success": False, "error": "No file data"}
 
@@ -284,25 +306,29 @@ class Handler(ThreadedHandler):
         path, fid = body.get("file_path",""), body.get("file_id","")
         if not path:
             for f in os.listdir(UPLOAD_DIR):
-                if f.startswith(fid): path = os.path.join(UPLOAD_DIR, f); break
+                if f.startswith(fid):
+                    path = os.path.join(UPLOAD_DIR, f)
+                    break
         if not path or not os.path.exists(path):
             return {"success": False, "error": "File not found"}
         ext = os.path.splitext(path)[1].lower()
         text = ""
-        if ext == ".pdf": text = _ocr_pdf(path)
-        elif ext in (".png",".jpg",".jpeg",".bmp"): text = _ocr_image(path)
+        if ext == ".pdf":
+            text = _ocr_pdf(path)
+        elif ext in (".png",".jpg",".jpeg",".bmp"):
+            text = _ocr_image(path)
         else:
-            with open(path, "r", errors="ignore") as f: text = f.read()
+            with open(path, "r", errors="ignore") as f:
+                text = f.read()
         if not text or len(text.strip()) < 10:
             return {"success": False, "error": "Could not extract text"}
         return {"success": True, "text": text, "length": len(text)}
 
     def _analyze(self, body):
-        """从判决书提取案件信息，支持重试"""
         import re
         txt = body.get("text", "")
-        if not txt: return {"success": False, "error": "No text"}
-        # 使用更多文本（6000字）
+        if not txt:
+            return {"success": False, "error": "No text"}
         text_chunk = txt[:6000]
 
         REQUIRED_FIELDS = ["案号","案由","原告","被告","判决法院","判决日期","判决结果","上诉期限","上诉法院"]
@@ -312,13 +338,13 @@ class Handler(ThreadedHandler):
 
 {{
   "案号": "判决书上的完整案号，如(2025)皖0406民初3597号",
-  "案由": "案件类型，如生命权纠纷、民间借贷纠纷等",
-  "原告": "原告全称（自然人：姓名+性别+出生年月+住所地；法人：名称+住所地）",
-  "被告": "被告全称（同上格式）",
-  "判决法院": "作出判决的法院全称，如安徽省淮南市潘集区人民法院",
-  "判决日期": "判决书上载明的日期，格式为YYYY年MM月DD日，如二〇二五年九月三日",
-  "判决结果": "一审法院判决的核心内容摘要（2-3句话概括判决主文）",
-  "上诉期限": "法定期限数字，单位天（默认15天）",
+  "案由": "案件类型",
+  "原告": "原告全称",
+  "被告": "被告全称",
+  "判决法院": "作出判决的法院全称",
+  "判决日期": "判决书上载明的日期，格式为YYYY年MM月DD日",
+  "判决结果": "一审判决结果核心摘要",
+  "上诉期限": "法定期限数字(默认15天)",
   "上诉法院": "上诉至哪个人民法院"
 }}
 
@@ -330,47 +356,47 @@ class Handler(ThreadedHandler):
 {text_chunk}"""
 
         def try_parse(r):
-            """解析AI响应，提取JSON（支持嵌套结构）"""
             cl = r.strip()
-            if not cl: return None, "空响应"
-            # 移除代码块标记
+            if not cl:
+                return None, "空响应"
             if cl.startswith("```"):
                 lines = cl.split("\n")
                 if lines[0].strip().startswith("```"):
                     cl = "\n".join(lines[1:])
                 if cl.strip().endswith("```"):
                     cl = cl.strip()[:-3].strip()
-            # 方法1: 找 ```json 代码块
             m = re.search(r'```(?:json)?\s*\n([\s\S]*?)\n```', cl, re.DOTALL)
             if m:
-                try: return json.loads(m.group(1)), None
-                except: pass
-            # 方法2: 括号匹配找最外层JSON对象（支持嵌套）
+                try:
+                    return json.loads(m.group(1)), None
+                except:
+                    pass
             start = cl.find('{')
             if start >= 0:
                 depth = 0
                 for i in range(start, len(cl)):
-                    if cl[i] == '{': depth += 1
-                    elif cl[i] == '}': depth -= 1
+                    if cl[i] == '{':
+                        depth += 1
+                    elif cl[i] == '}':
+                        depth -= 1
                     if depth == 0:
-                        try: return json.loads(cl[start:i+1]), None
-                        except: break
-            # 方法3: 整个字符串当JSON
-            try: return json.loads(cl), None
-            except Exception as e: return None, str(e)
+                        try:
+                            return json.loads(cl[start:i+1]), None
+                        except:
+                            break
+            try:
+                return json.loads(cl), None
+            except Exception as e:
+                return None, str(e)
 
-        # 第一次请求
         prompt = build_prompt()
         r = _call_ai(prompt, "你是法律信息提取AI。只返回纯JSON，不要任何其他文字。")
         info, err = try_parse(r)
 
         if info:
-            # 检查缺失字段
             missing = [f for f in REQUIRED_FIELDS if not info.get(f) or str(info.get(f)).strip() in ("","无","未提取","null","undefined")]
             if not missing:
                 return {"success": True, "info": info}
-
-            # 重试：补充缺失字段
             missing_str = "、".join(missing)
             retry_count = 0
             while missing and retry_count < 2:
@@ -384,7 +410,6 @@ class Handler(ThreadedHandler):
                             info[f] = info_retry[f]
                     missing = [f for f in missing if not info.get(f) or str(info.get(f)).strip() in ("","无","未提取")]
 
-        # 最终兜底：OCR原文补充
         if info:
             for f in REQUIRED_FIELDS:
                 if not info.get(f) or str(info.get(f)).strip() in ("","无","未提取","null"):
@@ -393,8 +418,8 @@ class Handler(ThreadedHandler):
 
         return {"success": True, "info": {"raw": r if r else ""}}
 
+
     def _generate_stream(self, body):
-        """SSE 流式生成诉状"""
         import re, threading, time
         info = body.get("info", {})
         ocr_text = body.get("ocr_text", "")
@@ -404,14 +429,12 @@ class Handler(ThreadedHandler):
         stream_timed_out = False
 
         def send_sse(data_dict):
-            """发送 SSE 事件"""
             try:
                 self.wfile.write(f"data: {json.dumps(data_dict, ensure_ascii=False)}\n\n".encode())
                 self.wfile.flush()
             except BrokenPipeError:
                 raise Exception("客户端已断开连接")
             except Exception as e:
-                import sys
                 print(f"[SSE send error] {e}", flush=True, file=sys.stderr)
 
         def on_chunk(chunk):
@@ -432,10 +455,8 @@ class Handler(ThreadedHandler):
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
 
-            # 生成 prompt（简化）
             prompt = f"请根据以下信息生成一份民事上诉状：{json.dumps(info, ensure_ascii=False)}，判决书内容：{ocr_text[:1000]}"
 
-            # 流式调用，带120秒超时
             def stream_task():
                 try:
                     _call_ai_stream(prompt, retries=2, callback=on_chunk)
@@ -445,12 +466,11 @@ class Handler(ThreadedHandler):
             t = threading.Thread(target=stream_task)
             t.daemon = True
             t.start()
-            if not stream_done.wait(120):  # 120秒超时
+            if not stream_done.wait(120):
                 stream_timed_out = True
                 send_sse({"type": "error", "error": "生成超时（120秒）"})
                 return
 
-            # 提取法律依据
             text_so_far = "".join(full_text)
             legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text_so_far)
             legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
@@ -473,11 +493,12 @@ class Handler(ThreadedHandler):
         ocr_text = body.get("ocr_text", "")
         firm = "安徽国恒律师事务所"
         attorney = "赵光辉"
-        position = "上诉人"
         if ocr_text:
-            idx1 = ocr_text.find(firm); idx2 = ocr_text.find(attorney)
+            idx1 = ocr_text.find(firm)
+            idx2 = ocr_text.find(attorney)
             start = max(idx1, idx2) - 200 if max(idx1, idx2) >= 0 else 0
-            if start < 0: start = 0
+            if start < 0:
+                start = 0
             context = ocr_text[start:start+300]
             client_side = "上诉人（原审被告）" if "被告" in context or "被上诉人" not in context else "上诉人（原审原告）"
         else:
@@ -516,5 +537,4 @@ class Handler(ThreadedHandler):
 
 if __name__ == "__main__":
     print(f"AI Backend ({OPENROUTER_MODEL}): http://localhost:3457", flush=True)
-    # 懒加载 OCR（首次请求时初始化，避免启动阻塞）
     ThreadedTCPServer(("0.0.0.0", 3457), Handler).serve_forever()
