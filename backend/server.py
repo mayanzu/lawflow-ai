@@ -3,6 +3,8 @@
 真实 PaddleOCR + AI 分析 + 上诉状生成
 """
 import json, os, sys, time, subprocess, socketserver, http.client
+import threading
+import shutil
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # 模型配置
@@ -29,9 +31,6 @@ def _cleanup_old_uploads(days=7):
     except Exception:
         pass
 
-import threading
-import shutil
-import threading
 _paddle_ocr = None
 _paddle_ocr_lock = threading.Lock()
 
@@ -120,7 +119,6 @@ def _call_ai_stream(prompt, system="", retries=2, callback=None):
     if callback:
         callback(f"[AI 调用失败: {last_err}]")
 
-
 def _call_ai(prompt, system="", retries=2):
     """同步版本，兼容旧代码"""
     chunks = []
@@ -184,7 +182,6 @@ class ThreadedTCPServer(socketserver.ThreadingMixIn, HTTPServer):
 
 class Handler(ThreadedHandler):
     pass
-
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -373,7 +370,6 @@ class Handler(ThreadedHandler):
             return {"success": True, "info": info}
 
         return {"success": True, "info": {"raw": r if r else ""}}
-
 
     def _generate_stream(self, body):
         """SSE 流式生成诉状"""
