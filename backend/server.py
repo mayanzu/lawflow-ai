@@ -64,10 +64,9 @@ def _ocr_image(path):
 def _ocr_pdf(path):
     """PDF OCR:
     1. 先用 pdfplumber 提取文字（纯文本PDF，秒级）
-    2. 无文字时用 fitz 转图 + RapidOCR 分批识别（扫描件，5页/批防OOM）"""
-    import subprocess
+    2. 无文字时用 fitz 转图 + RapidOCR 逐页识别（扫描件，严格逐页释放内存确保<1GB）"""
     import gc
-    # Step 1: Text-based PDF (fast)
+    # Step 1: Text-based PDF (fast, near-zero memory)
     try:
         import pdfplumber
         parts = []
@@ -81,48 +80,54 @@ def _ocr_pdf(path):
     except Exception as e:
         print(f"[OCR pdfplumber] {e}", flush=True)
 
-    # Step 2: Scanned PDF (fitz + RapidOCR, batched)
+    # Step 2: Scanned PDF - fitz + RapidOCR, one page at a time
     ocr = _get_ocr_img()
     if not ocr:
         return ""
 
     try:
         import fitz
+        # 降低DPI: 1.2x = ~960px宽(A4)，OCR足够，内存减半
+        MATRIX = fitz.Matrix(1.2, 1.2)
+        
         doc = fitz.open(path)
         total_pages = min(len(doc), 30)
-        BATCH = 5  # 5页/批，防4G内存服务器OOM
         all_text = []
 
-        for i in range(0, total_pages, BATCH):
-            end = min(i + BATCH, total_pages)
-            page_texts = []
-            for pg in range(i, end):
-                pix = doc[pg].get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+        for pg in range(total_pages):
+            # 渲染一页 -> 临时文件 -> OCR -> 立即释放
+            pix = None
+            tmp = None
+            try:
+                pix = doc[pg].get_pixmap(matrix=MATRIX)
                 tmp = tempfile.mktemp(suffix=".png")
                 pix.save(tmp)
-                try:
-                    result = ocr(tmp)
-                    if result and hasattr(result, 'txts'):
-                        texts = [t for t in result.txts if t and t.strip()]
-                        if texts:
-                            page_texts.append("\n".join(texts))
-                except Exception as e:
-                    print(f"[OCR page {pg}] {e}", flush=True)
-                finally:
-                    if os.path.exists(tmp):
-                        os.remove(tmp)
-                    del pix
-                    gc.collect()
+                del pix  # 立即释放Pixmap内存
+                pix = None
 
-            if page_texts:
-                all_text.extend(page_texts)
+                result = ocr(tmp)
+                if result and hasattr(result, 'txts'):
+                    texts = [t for t in result.txts if t and t.strip()]
+                    if texts:
+                        all_text.append("\n".join(texts))
+            except Exception as e:
+                print(f"[OCR page {pg}] {e}", flush=True)
+            finally:
+                # 绝对确保临时文件和对象被清理
+                if tmp and os.path.exists(tmp):
+                    os.remove(tmp)
+                if pix is not None:
+                    del pix
+                gc.collect()
 
         doc.close()
+        del doc
         gc.collect()
 
         text = "\n".join(all_text)
         if text.strip():
             return text
+        print("[OCR-pdf] returned empty", flush=True)
     except Exception as e:
         print(f"[OCR-pdf] {e}", flush=True)
 
