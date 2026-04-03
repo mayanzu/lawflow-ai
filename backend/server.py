@@ -48,12 +48,66 @@ def _get_ocr_img():
                     print(f"[OCR-img] {e}", flush=True)
     return _rapidocr_img
 
+def _preprocess_image(path):
+    """图片预处理：提升 OCR 识别率"""
+    from PIL import Image, ImageFilter, ImageEnhance
+    import io
+
+    img = Image.open(path).convert('RGB')
+    w, h = img.size
+
+    # 超大图片：缩放到适合 OCR 的宽度（2000-3000px）
+    target_width = 2400
+    if w > target_width:
+        ratio = target_width / w
+        img = img.resize((target_width, int(h * ratio)), Image.LANCZOS)
+
+    # 太小的图片：放大到至少 1200px 宽
+    if img.size[0] < 1200 and w > 10:
+        ratio = 1024 / img.size[0]
+        img = img.resize((1024, int(img.size[1] * ratio)), Image.LANCZOS)
+
+    # 转灰度
+    gray = img.convert('L')
+
+    # 增强对比度（对扫描件尤其有效）
+    enhancer = ImageEnhance.Contrast(gray)
+    gray = enhancer.enhance(1.2)
+
+    # 降噪：轻微模糊去毛刺
+    gray = gray.filter(ImageFilter.MedianFilter(size=3))
+
+    return gray
+
+
 def _ocr_image(path):
-    """图片 OCR - RapidOCR"""
+    """图片 OCR：PIL 预处理 → RapidOCR"""
     ocr = _get_ocr_img()
     if not ocr:
         return ""
     try:
+        # 预处理（转灰度、缩放、降噪、增强对比度）
+        preprocessed = _preprocess_image(path)
+        import tempfile, io
+        buf = io.BytesIO()
+        preprocessed.save(buf, format='PNG')
+        tmp_img = tempfile.mktemp(suffix=".png")
+        with open(tmp_img, 'wb') as f:
+            f.write(buf.getvalue())
+
+        try:
+            result = ocr(tmp_img)
+        finally:
+            if os.path.exists(tmp_img):
+                os.remove(tmp_img)
+
+        if result and hasattr(result, 'txts'):
+            texts = [t for t in result.txts if t and t.strip()]
+            total = "\n".join(texts)
+            if len(total) > 50:
+                return total
+        
+        # 预处理后结果不够好，fallback 到原图
         result = ocr(path)
         if result and hasattr(result, 'txts'):
             return "\n".join([t for t in result.txts if t and t.strip()])
