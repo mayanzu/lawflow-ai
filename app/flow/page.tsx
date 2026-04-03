@@ -65,13 +65,49 @@ export default function FlowPage() {
     throw new Error('请求失败')
   }
 
+  async function waitForUpload(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const check = () => {
+        const uploadDone = localStorage.getItem('lw_upload_done')
+        const uploadError = localStorage.getItem('lw_upload_error')
+        if (uploadError) {
+          localStorage.removeItem('lw_upload_error')
+          reject(uploadError)
+        } else if (uploadDone) {
+          const fid = localStorage.getItem('lw_file_id') || ''
+          localStorage.removeItem('lw_upload_done')
+          localStorage.removeItem('lw_upload_error')
+          if (!fid) reject('上传成功但未获取文件ID')
+          else resolve(fid)
+        } else {
+          setTimeout(check, 300)
+        }
+      }
+      check()
+    })
+  }
+
   async function processFile() {
-    if (processRef.current || !fileIdRef.current) return
+    if (processRef.current) return
     processRef.current = true
 
-    setStepStatus(0, 'done', 100, '完成')
+    // 步骤0: 上传（如果是后台上传模式）
+    if (!fileIdRef.current) {
+      setStepStatus(0, 'active', 0, '正在上传...')
+      try {
+        const fid = await waitForUpload()
+        fileIdRef.current = fid
+        setStepStatus(0, 'done', 100, '完成')
+      } catch (err: any) {
+        setStepStatus(0, 'error', 0, err.message || '上传失败')
+        setError(`上传失败: ${err.message || '未知错误'}`)
+        return
+      }
+    } else {
+      setStepStatus(0, 'done', 100, '完成')
+    }
 
-    // OCR
+    // 步骤1: OCR
     setStepStatus(1, 'active', 10, '正在识别文档...')
     try {
       const ocrRes = await callApi('/api/ocr', { file_id: fileIdRef.current })
@@ -85,7 +121,7 @@ export default function FlowPage() {
       setStepStatus(1, 'error', 0, err.message); setError(`OCR 识别失败: ${err.message}`); return
     }
 
-    // AI 分析
+    // 步骤2: AI 分析
     setStepStatus(2, 'active', 10, '正在提取案件信息...')
     try {
       const analyzeRes = await callApi('/api/analyze', { text: ocrTextRef.current })
@@ -98,8 +134,6 @@ export default function FlowPage() {
       if (err.message === '请求已取消') return
       setStepStatus(2, 'error', 0, err.message); setError(`分析失败: ${err.message}`); return
     }
-
-    // 显示结果，等用户点按钮继续
   }
 
   function goToConfirm() {
