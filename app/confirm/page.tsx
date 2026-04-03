@@ -24,6 +24,24 @@ export default function ConfirmPage() {
   function cnToInt(s: string): number {
     const d: Record<string, number> = {'〇':0,'零':0,'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9}
     if (!s) return 0
+    // 处理复杂中文数字（"二十" = 20, "二十一" = 21, "十五" = 15）
+    const cnNum: Record<string, number> = {
+        '〇':0,'零':0,'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,
+        '十':10,'百':100
+    }
+    // 匹配"十X"、"X十X"、"X百X十X"等格式
+    if (s.includes('十')) {
+        let result = 0
+        const parts = s.split('十')
+        if (parts[0] !== '') {
+            result += cnNum[parts[0]] ?? 0
+        }
+        result *= 10
+        if (parts[1] !== '') {
+            for (const ch of parts[1]) { result += cnNum[ch] ?? 0 }
+        }
+        return result
+    }
     let r = 0
     for (const ch of s) { if (ch in d) r = r * 10 + d[ch] }
     return r

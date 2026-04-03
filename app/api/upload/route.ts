@@ -29,17 +29,12 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(bytes)
     await writeFile(filePath, buffer)
 
-    // Return file ID for OCR processing
-    // Also include a small base64 preview for immediate display
-    const preview = buffer.toString('base64').slice(0, 1000)
-
     return NextResponse.json({
       success: true,
       file_id: fileId,
       file_path: filePath,
       file_name: file.name,
       file_size: file.size,
-      file_data: `data:${file.type};base64,${preview}`, // small preview only
     })
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 })

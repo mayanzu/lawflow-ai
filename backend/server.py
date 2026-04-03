@@ -29,10 +29,15 @@ def _cleanup_old_uploads(days=7):
     except Exception:
         pass
 
+import threading
 import shutil
 import threading
 _paddle_ocr = None
 _paddle_ocr_lock = threading.Lock()
+
+# 速率控制
+_last_ai_call = 0.0
+_ai_call_lock = threading.Lock()
 
 def _get_ocr():
     global _paddle_ocr
@@ -49,6 +54,12 @@ def _get_ocr():
 def _call_ai_stream(prompt, system="", retries=2, callback=None):
     from urllib.request import Request, urlopen
     import time
+    global _last_ai_call
+    with _ai_call_lock:
+        elapsed = time.time() - _last_ai_call
+        if elapsed < 3.0:
+            time.sleep(3.0 - elapsed)
+        _last_ai_call = time.time()
     msgs = []
     if system: msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
@@ -128,8 +139,8 @@ def _ocr_pdf(path):
             for pg in pdf.pages:
                 t = pg.extract_text()
                 if t and len(t.strip()) > 10: parts.append(t)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[OCR pdfplumber] {e}", flush=True)
     if parts: return "\n".join(parts)
     ocr = _get_ocr()
     doc = None
@@ -300,16 +311,32 @@ class Handler(ThreadedHandler):
 {text_chunk}"""
 
         def try_parse(r):
-            """解析AI响应，尝试提取有效JSON"""
+            """解析AI响应，提取JSON（支持嵌套结构）"""
             cl = r.strip()
             if not cl: return None, "空响应"
-            if cl.startswith("```"): cl = cl.split("\n",1)[-1]
-            if cl.endswith("```"): cl = cl[:-3].strip()
-            # 尝试找JSON块
-            m = re.search(r'\{[^{}]*\}', cl, re.DOTALL)
+            # 移除代码块标记
+            if cl.startswith("```"):
+                lines = cl.split("\n")
+                if lines[0].strip().startswith("```"):
+                    cl = "\n".join(lines[1:])
+                if cl.strip().endswith("```"):
+                    cl = cl.strip()[:-3].strip()
+            # 方法1: 找 ```json 代码块
+            m = re.search(r'```(?:json)?\s*\n([\s\S]*?)\n```', cl, re.DOTALL)
             if m:
-                try: return json.loads(m.group()), None
+                try: return json.loads(m.group(1)), None
                 except: pass
+            # 方法2: 括号匹配找最外层JSON对象（支持嵌套）
+            start = cl.find('{')
+            if start >= 0:
+                depth = 0
+                for i in range(start, len(cl)):
+                    if cl[i] == '{': depth += 1
+                    elif cl[i] == '}': depth -= 1
+                    if depth == 0:
+                        try: return json.loads(cl[start:i+1]), None
+                        except: break
+            # 方法3: 整个字符串当JSON
             try: return json.loads(cl), None
             except Exception as e: return None, str(e)
 
