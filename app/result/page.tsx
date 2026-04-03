@@ -17,19 +17,41 @@ export default function ResultPage() {
     const raw = localStorage.getItem('lw_appeal_text')
     if (raw) { setAppealText(raw); setEditedText(raw) }
     const fileId = localStorage.getItem('lw_file_id') || ''
-    const fileName = localStorage.getItem('lw_file_name') || ''
+    const fileName = localStorage.getItem('lw_file_name') || '未知文件'
     const caseInfoRaw = localStorage.getItem('lw_analyze_info')
+    const ocrRaw = localStorage.getItem('lw_ocr_text') || ''
+
+    // 提取案号作为 fallback
+    let caseNum = ''
+    if (ocrRaw) {
+      const m = ocrRaw.match(/([（(]\d{4}[）)][^\n]{2,10}民初|民终|民申|刑初|刑终|行初|行终)\d+号/)
+      if (m) caseNum = m[0].replace(/\s/g, '')
+    }
+
     let caseInfo: any = {}
     try { caseInfo = JSON.parse(caseInfoRaw || '{}') } catch {}
-    if (fileId) {
+
+    // 即使案号为空也保存历史记录
+    const entry = {
+      id: fileId || `manual_${Date.now()}`,
+      fileName,
+      uploadTime: new Date().toISOString(),
+      案号: caseInfo.案号 || caseNum || '未识别',
+      原告: caseInfo.原告 || '未知',
+      被告: caseInfo.被告 || '未知',
+      判决法院: caseInfo.判决法院 || ''
+    }
+
+    try {
       const historyRaw = localStorage.getItem('lw_history')
       let history: any[] = []
       try { history = JSON.parse(historyRaw || '[]') } catch {}
-      const entry = { id: fileId, fileName, uploadTime: new Date().toISOString(), 案号: caseInfo.案号||'', 原告: caseInfo.原告||'', 被告: caseInfo.被告||'', 判决法院: caseInfo.判决法院||'' }
-      const existing = history.findIndex(h => h.id === fileId)
+      const existing = history.findIndex(h => h.id === entry.id)
       if (existing >= 0) history[existing] = entry; else history.unshift(entry)
       history = history.slice(0, 20)
       localStorage.setItem('lw_history', JSON.stringify(history))
+    } catch (e) {
+      console.error('Failed to save history:', e)
     }
     const basisStr = localStorage.getItem('lw_legal_basis')
     if (basisStr) { try { setLegalBasis(JSON.parse(basisStr)) } catch {} }
