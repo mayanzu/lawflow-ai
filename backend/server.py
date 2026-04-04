@@ -77,16 +77,54 @@ def _tencent_ocr_base64(image_base64):
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-# 上传文件7天自动清理
-def _cleanup_old_uploads(days=7):
+# 上传文件清理：7天过期 或 超过20个文件 或 总量>1GB
+_last_cleanup = 0.0
+_CLEANUP_INTERVAL = 3600  # 每1小时清理一次
+
+def _cleanup_old_uploads():
+    global _last_cleanup
+    now = time.time()
+    if now - _last_cleanup < _CLEANUP_INTERVAL:
+        return  # 距离上次清理不到1小时，跳过
+    _last_cleanup = now
     try:
-        cutoff = time.time() - days * 86400
+        cutoff = time.time() - 7 * 86400
+        files = []
+        total_size = 0
         for f in os.listdir(UPLOAD_DIR):
             p = os.path.join(UPLOAD_DIR, f)
-            if os.path.isfile(p) and os.stat(p).st_mtime < cutoff:
+            if os.path.isfile(p):
+                stat = os.stat(p)
+                total_size += stat.st_size
+                files.append((p, stat.st_mtime))
+        
+        # 1. 删除7天前的文件
+        files.sort(key=lambda x: x[1], reverse=True)
+        for p, mtime in files:
+            if mtime < cutoff:
                 os.remove(p)
-    except Exception:
-        pass
+        
+        # 2. 只保留最近20个文件
+        files = sorted(files, key=lambda x: x[1], reverse=True)
+        if len(files) > 20:
+            for p, _ in files[20:]:
+                if os.path.exists(p):
+                    os.remove(p)
+        
+        # 3. 总量超过1GB时删除最旧文件
+        remaining = [p for p, _ in sorted(files[:20], key=lambda x: x[1], reverse=True) if os.path.exists(p)]
+        total = sum(os.path.getsize(p) for p in remaining if os.path.exists(p))
+        files = sorted(files[:20], key=lambda x: x[1])  # oldest first
+        while total > 1024*1024*1024 and files:
+            old_p = files.pop(0)[0]
+            if os.path.exists(old_p):
+                total -= os.path.getsize(old_p)
+                os.remove(old_p)
+    except Exception as e:
+        print(f"[Cleanup error] {e}", flush=True)
+
+# 启动时立即清理一次
+_cleanup_old_uploads()
 
 # ===== OCR 引擎 =====
 _rapidocr_img = None
@@ -437,11 +475,11 @@ class Handler(ThreadedHandler):
         self.end_headers()
 
     def do_POST(self):
-        _cleanup_old_uploads()
+        _cleanup_old_uploads()  # 每1小时执行一次
         ct = self.headers.get("Content-Type", "")
         if "multipart/form-data" in ct:
             n = int(self.headers.get("Content-Length", 0))
-            if n > 50 * 1024 * 1024:
+            if n > 50 * 1024 * 1024:  # 单文件上限50MB
                 self.send_error(413, "Request body too large")
                 return
             raw = self.rfile.read(n)
