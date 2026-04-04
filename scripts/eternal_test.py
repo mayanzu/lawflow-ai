@@ -43,7 +43,7 @@ def get_api_key():
             return json.load(f)['profiles']['openrouter:default']['key']
     except: return ''
 
-VOLC_KEY = '2ca8da3c-39f4-42db-a082-74af87001b5e'
+VOLC_KEY = os.environ.get('VOLCENGINE_KEY', '')
 
 def upload(path, mime):
     with open(path, 'rb') as f:

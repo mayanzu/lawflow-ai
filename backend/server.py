@@ -19,7 +19,7 @@ else:
     OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '')
 
 # 火山引擎方舟 (备用，无频率限制)
-VOLCENGINE_KEY = '2ca8da3c-39f4-42db-a082-74af87001b5e'
+VOLCENGINE_KEY = os.environ.get('VOLCENGINE_KEY', '')
 VOLCENGINE_MODEL = 'doubao-seed-2-0-lite-260215'
 VOLCENGINE_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
 VOLCENGINE_REASONING = 'minimal'  # minimal, low, medium, high
