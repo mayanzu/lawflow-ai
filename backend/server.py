@@ -19,11 +19,60 @@ else:
     OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '')
 
 # 火山引擎方舟 (备用，无频率限制)
-VOLCENGINE_KEY = os.environ.get('VOLCENGINE_KEY', '')
+def _load_env():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.env")
+    try:
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    k, v = line.split('=', 1)
+                    os.environ[k.strip()] = v.strip()
+    except: pass
+_load_env()
+VOLCENGINE_KEY = os.environ.get('VOLCENGINE_KEY', '2ca8da3c-39f4-42db-a082-74af87001b5e')
 VOLCENGINE_MODEL = 'doubao-seed-2-0-lite-260215'
 VOLCENGINE_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
 VOLCENGINE_REASONING = 'minimal'  # minimal, low, medium, high
 AI_PROVIDER = 'volcengine'  # openrouter 或 volcengine
+
+# ===== 腾讯云 OCR 配置 =====
+def _load_tencent_creds():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.env")
+    try:
+        with open(env_path) as f:
+            for line in f:
+                if '=' in line:
+                    k, v = line.strip().split('=', 1)
+                    os.environ[k] = v
+    except: pass
+
+_load_tencent_creds()
+TENCENT_SECRET_ID = os.environ.get('TENCENT_SECRET_ID', '')
+TENCENT_SECRET_KEY = os.environ.get('TENCENT_SECRET_KEY', '')
+USE_TENCENT_OCR = bool(TENCENT_SECRET_ID and TENCENT_SECRET_KEY)
+
+def _tencent_ocr_base64(image_base64):
+    "调用腾讯云通用印刷体识别接口"
+    try:
+        from tencentcloud.common import credential
+        from tencentcloud.common.exception import tencent_cloud_sdk_exception
+        from tencentcloud.ocr.v20181119 import ocr_client, models
+        
+        cred = credential.Credential(TENCENT_SECRET_ID, TENCENT_SECRET_KEY)
+        client = ocr_client.OcrClient(cred, "ap-guangzhou")
+        req = models.GeneralBasicOCRRequest()
+        req.ImageBase64 = image_base64
+        # 识别所有语言（默认中文）
+        resp = client.GeneralBasicOCR(req)
+        
+        lines = []
+        for text_item in resp.TextDetections:
+            lines.append(text_item.DetectedText)
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[Tencent OCR error] {e}", flush=True)
+        return None  # openrouter 或 volcengine
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -133,17 +182,28 @@ def _preprocess_image_cv2(path):
 
 
 def _ocr_image(path):
-    """图片 OCR：OpenCV 预处理 + RapidOCR + 原图兜底"""
+    """图片 OCR：腾讯云OCR优先，本地RapidOCR兜底"""
+    import base64
+    # 1. Tencent OCR first (highest accuracy for Chinese documents)
+    if USE_TENCENT_OCR:
+        try:
+            with open(path, 'rb') as f:
+                img_data = base64.b64encode(f.read()).decode('utf-8')
+            result = _tencent_ocr_base64(img_data)
+            if result and len(result) > 50:
+                print(f"[Tencent OCR] {len(result)} chars", flush=True)
+                return result
+        except Exception as e:
+            print(f"[Tencent OCR fallback]: {e}", flush=True)
+    
+    # 2. Fallback: Local RapidOCR with OpenCV preprocessing
     ocr = _get_ocr_img()
     if not ocr:
         return ""
     try:
         import tempfile
         cv2 = __import__('cv2')
-
-        # 步骤1: OpenCV 预处理（CLAHE + 二值化 + 倾斜校正 + 缩放）
         preprocessed = _preprocess_image_cv2(path)
-        
         if preprocessed is not None:
             tmp_cv = tempfile.mktemp(suffix=".png")
             cv2.imwrite(tmp_cv, preprocessed)
@@ -152,14 +212,12 @@ def _ocr_image(path):
             finally:
                 if os.path.exists(tmp_cv):
                     os.remove(tmp_cv)
-
             if result and hasattr(result, 'txts'):
                 texts = [t for t in result.txts if t and t.strip()]
                 total = "\n".join(texts)
                 if len(total) > 50:
                     return total
-
-        # 步骤2: 预处理效果不够好，用原图 + 调高检测边长
+        # Direct fallback
         try:
             result2 = ocr(path)
             if result2 and hasattr(result2, 'txts'):
@@ -170,15 +228,16 @@ def _ocr_image(path):
         except Exception:
             pass
     except Exception as e:
-        print(f"[OCR-img] {e}", flush=True)
+        print(f"[OCR-local] {e}", flush=True)
     return ""
 
 
 def _ocr_pdf(path):
     """PDF OCR:
     1. 先用 pdfplumber 提取文字（纯文本PDF，秒级）
-    2. 无文字时用 fitz 转图 + RapidOCR 逐页识别（扫描件，严格逐页释放内存确保<1GB）"""
+    2. 无文字时，腾讯云OCR优先，本地 RapidOCR 逐页兜底"""
     import gc
+    import base64
     # Step 1: Text-based PDF (fast, near-zero memory)
     try:
         import pdfplumber

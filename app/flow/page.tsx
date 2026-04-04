@@ -31,6 +31,8 @@ function FlowContent() {
   const [ocrText, setOcrText] = useState('')
   const [ocrExpanded, setOcrExpanded] = useState(false)
   const [fileName, setFileName] = useState('')
+  const [isDone, setIsDone] = useState(false)
+  const [analyzeInfo, setAnalyzeInfo] = useState<any>(null)
 
   const processRef = useRef<boolean>(false)
   const fileIdRef = useRef<string>('')
@@ -90,6 +92,7 @@ function FlowContent() {
       const analyzeRes = await callApi('/api/analyze', { text })
       if (analyzeRes.success && analyzeRes.info) {
         localStorage.setItem('lw_analyze_info', JSON.stringify(analyzeRes.info))
+        setAnalyzeInfo(analyzeRes.info)
         setStepStatus(2, 'done', 100, '完成')
       } else {
         setStepStatus(2, 'done', 100, '完成（可手动填写）')
@@ -98,7 +101,11 @@ function FlowContent() {
       setStepStatus(2, 'done', 100, '完成（可手动填写）')
     }
 
-    setTimeout(() => router.push('/confirm'), 1000)
+    setIsDone(true)
+  }
+
+  function handleGoToConfirm() {
+    router.push('/confirm')
   }
 
   useEffect(() => {
@@ -124,8 +131,12 @@ function FlowContent() {
 
       {/* 主内容 */}
       <main style={{ maxWidth: 680, margin: '0 auto', padding: '48px 24px 80px' }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px', letterSpacing: '-0.03em' }}>正在处理</h1>
-        <p style={{ fontSize: 15, color: '#86868B', margin: '0 0 40px' }}>{error ? error : '请稍候，系统正在处理您的文件。'}</p>
+        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px', letterSpacing: '-0.03em' }}>
+          {isDone ? '处理完成' : error ? '处理出错' : '正在处理'}
+        </h1>
+        <p style={{ fontSize: 15, color: '#86868B', margin: '0 0 40px' }}>
+          {error ? error : isDone ? '已为您提取案件信息，请确认后继续。' : '请稍候，系统正在处理您的文件。'}
+        </p>
 
         {/* 步骤列表 */}
         <div style={{ background: '#F8F9FA', borderRadius: 16, padding: 24, marginBottom: 24 }}>
@@ -153,9 +164,32 @@ function FlowContent() {
           ))}
         </div>
 
+        {/* AI 分析结果预览 */}
+        {isDone && analyzeInfo && (
+          <div style={{ background: '#F8F9FA', borderRadius: 16, overflow: 'hidden', marginBottom: 32 }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #E8E8ED' }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', marginBottom: 16 }}>AI 提取的案件信息</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {(['案号', '案由', '原告', '被告', '判决法院', '判决日期', '判决结果', '上诉期限', '上诉法院'] as const).map(k => {
+                  const v = analyzeInfo[k]
+                  const valid = v && typeof v === 'string' && v.trim() !== '' && v.trim() !== '无' && v.trim() !== '未提取'
+                  return (
+                    <div key={k} style={{ padding: '8px 10px', background: valid ? '#FFFFFF' : '#FFF8F0', borderRadius: 8 }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: '#86868B', letterSpacing: '0.04em', marginBottom: 2 }}>{k}</div>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: valid ? '#1D1D1F' : '#E65100', lineHeight: 1.4 }}>
+                        {valid ? v : '待确认'}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* OCR 结果预览 */}
-        {ocrText && (
-          <div style={{ background: '#F8F9FA', borderRadius: 16, overflow: 'hidden' }}>
+        {ocrText && isDone && (
+          <div style={{ background: '#F8F9FA', borderRadius: 16, overflow: 'hidden', marginBottom: 32 }}>
             <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setOcrExpanded(v => !v)}>
               <div>
                 <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', marginBottom: 2 }}>OCR 识别结果</div>
@@ -176,9 +210,17 @@ function FlowContent() {
           <div style={{ marginTop: 24, padding: '16px 20px', background: '#FEF0EF', borderRadius: 14, border: '1px solid #F5C6C5' }}>
             <div style={{ fontSize: 13, color: '#D93025', marginBottom: 16 }}>{rateLimit ? `请求过于频繁，${retryAfter} 秒后重试...` : error}</div>
             <div style={{ display: 'flex', gap: 10 }}>
-              {!rateLimit && <button onClick={() => { processRef.current = false; processFile() }} style={{ flex: 1, padding: '10px 16px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>重试</button>}
+              {!rateLimit && <button onClick={() => { processRef.current = false; setIsDone(false); setError(''); processFile() }} style={{ flex: 1, padding: '10px 16px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>重试</button>}
               <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); router.push('/') }} style={{ flex: 1, padding: '10px 16px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>重新上传</button>
             </div>
+          </div>
+        )}
+
+        {/* 完成后的操作按钮 */}
+        {isDone && !error && (
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button onClick={() => router.push('/')} style={{ flex: 1, padding: '14px 20px', background: '#FFF', color: '#1D1D1F', border: '1px solid #E0E0E0', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500 }}>上传新文件</button>
+            <button onClick={handleGoToConfirm} style={{ flex: 2, padding: '14px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>确认信息并继续</button>
           </div>
         )}
       </main>
