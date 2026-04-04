@@ -35,21 +35,30 @@ export default function ResultPage() {
     }
     let caseInfo: any = {}
     try { caseInfo = JSON.parse(caseInfoRaw || '{}') } catch {}
-    const entry = {
+    const entry: any = {
       id: fileId || `manual_${Date.now()}`,
       fileName,
       uploadTime: new Date().toISOString(),
       案号: caseInfo.案号 || caseNum || '未识别',
       原告: caseInfo.原告 || '未知',
       被告: caseInfo.被告 || '未知',
-      判决法院: caseInfo.判决法院 || ''
+      判决法院: caseInfo.判决法院 || '',
+      案由: caseInfo.案由 || '',
+      上诉法院: caseInfo.上诉法院 || '',
+      判决日期: caseInfo.判决日期 || '',
+      analyzeInfo: caseInfo,
     }
     try {
       const historyRaw = localStorage.getItem('lw_history')
       let history: any[] = []
       try { history = JSON.parse(historyRaw || '[]') } catch {}
       const existing = history.findIndex(h => h.id === entry.id)
-      if (existing >= 0) history[existing] = entry; else history.unshift(entry)
+      // 合并更新数据，不覆盖已有的上诉文书
+      if (existing >= 0) {
+        history[existing] = { ...history[existing], ...entry }
+      } else {
+        history.unshift(entry)
+      }
       history = history.slice(0, 20)
       localStorage.setItem('lw_history', JSON.stringify(history))
     } catch {}
@@ -105,6 +114,16 @@ export default function ResultPage() {
                 setStreamDone(true)
                 setIsGenerating(false)
                 localStorage.setItem('lw_appeal_text', finalText)
+                // Update history with appealText
+                try {
+                  const hist = JSON.parse(localStorage.getItem('lw_history') || '[]')
+                  const fid = localStorage.getItem('lw_file_id') || ''
+                  const idx = hist.findIndex((h: any) => h.id === fid)
+                  if (idx >= 0) {
+                    hist[idx].appealText = finalText
+                    localStorage.setItem('lw_history', JSON.stringify(hist))
+                  }
+                } catch {}
                 if (data.legal_basis?.length > 0) {
                   setLegalBasis(data.legal_basis)
                   localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis))
