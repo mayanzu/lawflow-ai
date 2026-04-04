@@ -71,10 +71,11 @@ function FlowContent() {
 
     // OCR
     setStepStatus(1, 'active', 10, '正在识别文档...')
+    let text = ''
     try {
       const ocrRes = await callApi('/api/ocr', { file_id: fileIdRef.current })
       if (!ocrRes.success) throw new Error(ocrRes.error || 'OCR 识别失败')
-      const text = ocrRes.text || ''
+      text = ocrRes.text || ''
       setOcrText(text)
       localStorage.setItem('lw_ocr_text', text)
       setStepStatus(1, 'done', 100, `识别完成 ${text.length} 字`)
@@ -86,16 +87,18 @@ function FlowContent() {
     // AI 分析（静默运行，不展示 UI）
     setStepStatus(2, 'active', 10, '正在分析案件...')
     try {
-      const analyzeRes = await callApi('/api/analyze', { text: ocrText })
+      const analyzeRes = await callApi('/api/analyze', { text })
       if (analyzeRes.success && analyzeRes.info) {
         localStorage.setItem('lw_analyze_info', JSON.stringify(analyzeRes.info))
+        setStepStatus(2, 'done', 100, '完成')
+      } else {
+        setStepStatus(2, 'done', 100, '分析完成（可手动填写）')
       }
-    } catch {
-      // AI 分析失败不影响，用户可以在确认页手动填写
+    } catch (err: any) {
+      setStepStatus(2, 'done', 100, '分析完成（可手动填写）')
     }
-    setStepStatus(2, 'done', 100, '完成')
 
-    // OCR 完成，1秒后自动跳转到确认页
+    // 1秒后自动跳转到确认页
     setTimeout(() => router.push('/confirm'), 1000)
   }
 

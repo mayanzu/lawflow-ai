@@ -22,7 +22,7 @@ else:
 VOLCENGINE_KEY = '2ca8da3c-39f4-42db-a082-74af87001b5e'
 VOLCENGINE_MODEL = 'doubao-seed-2-0-lite-260215'
 VOLCENGINE_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
-VOLCENGINE_REASONING = 'low'  # minimal, low, medium, high
+VOLCENGINE_REASONING = 'minimal'  # minimal, low, medium, high
 AI_PROVIDER = 'volcengine'  # openrouter 或 volcengine
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
@@ -580,23 +580,33 @@ class Handler(ThreadedHandler):
         stream_timed_out = False
 
         # 使用与 _generate 相同的强化 prompt
-        prompt = f'''你是一名资深诉讼律师。请根据以下信息直接输出民事上诉状正文纯文本。
+        prompt = f'''你是安徽国恒律师事务所赵光辉律师。请根据以下案件信息撰写民事上诉状。
 
 ## 案件信息
 {json.dumps(info, ensure_ascii=False, indent=2)}
 
 ## 判决书原文
-{ocr_text[:3000]}
+{ocr_text}
+
+## 【格式要求】
+必须包含以下部分（按顺序）：
+1. 标题：民事上诉状
+2. 上诉人/被上诉人信息（从上方案件信息中提取姓名）
+3. 上诉请求（2-3项具体请求）
+4. 事实与理由（分3点以上，每点含法律依据）
+5. 结尾：此致 + 上诉法院全称
+6. 署名：上诉人姓名（从案件信息提取）
+7. 委托代理人：安徽国恒律师事务所 赵光辉 律师
 
 ## 【绝对禁止】
-❌ 禁止任何Markdown符号（** **、# 号、---）
-❌ 禁止任何前言说明（如"这是一份..."）
-❌ 禁止任何后缀提示（如"使用提示"、"注意事项"）
+❌ 禁止任何Markdown符号（** # --- ` ```）
+❌ 禁止前言说明（"以下是..." "根据..."）
+❌ 禁止后缀提示（"如需..." "注意..."）
 ❌ 禁止emoji
-❌ 禁止占位符
+❌ 禁止占位符（"XXX" "..." "年 月 日"）
+❌ 禁止省略任何署名
 
-## 【开始输出】
-从"民事上诉状"五个字开始，直接输出正文。'''
+直接输出文书正文，不要任何额外文字。'''
 
         def send_sse(data_dict):
             try:
@@ -682,7 +692,7 @@ class Handler(ThreadedHandler):
 {json.dumps(info, ensure_ascii=False, indent=2)}
 
 ## 判决书原文
-{ocr_text[:4000]}
+{ocr_text}
 
 ## 写作要求（极其重要，违反任何一条都会导致文书报废）
 【禁止事项】

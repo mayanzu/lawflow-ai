@@ -116,7 +116,7 @@ export default function ConfirmPage() {
     if (ocr && !info.判决日期) {
       const dateStr = parseDate(ocr)
       if (dateStr) {
-        calcDeadline(dateStr, parsedInfo.上诉期限 || '15')
+        calcDeadline(dateStr, info.上诉期限 || '15')
         setInfo(prev => ({ ...prev, 判决日期: dateStr }))
       }
     }
