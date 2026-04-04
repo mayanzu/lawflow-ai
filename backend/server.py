@@ -270,43 +270,66 @@ def _ocr_image(path):
     return ""
 
 
-def _clean_ocr_text(text):
-    """用 LLM 清洗 OCR 结果：去除水印噪点、修复错别字"""
-    if not text or len(text) < 50:
-        return text
-    system = "你是一个专业的法律文书校对助手。请对以下OCR识别的法律文书文本进行清洗。要求：\n1. 删除OCR水印、导航条、电话号码等噪点文字（如页眉、页脚、网址等）\n2. 修复形近字错误（如〇和0、己和已）\n3. 去除多余换行和分隔符\n4. 保持原文的法律文书结构和内容不变\n\n只返回清洗后的文本，不要任何其他说明。"
-    try:
-        cleaned = _call_ai(text, system=system, retries=1)
-        if cleaned and len(cleaned.strip()) > len(text) * 0.3:
-            return cleaned.strip()
-    except:
-        pass
-    return text
-
 
 def _ocr_pdf(path):
     """PDF OCR:
-    1. 先用 pdfplumber 提取文字（纯文本PDF，秒级）
-    2. 无文字时，腾讯云OCR优先，本地 RapidOCR 逐页兜底"""
+    1. 腾讯云 OCR 优先（每页转图片逐页识别）
+    2. pdfplumber 提取文字（纯文本PDF兜底）
+    3. 本地 RapidOCR 逐页兜底"""
     import gc
     import base64
-    # Step 1: Text-based PDF (fast, near-zero memory)
+    import fitz
+
+    doc = fitz.open(path)
+    total_pages = min(len(doc), 30)
+    MATRIX = fitz.Matrix(1.2, 1.2)
+
+    # Step 1: 腾讯云 OCR 优先（先试前5页，节省额度）
+    if USE_TENCENT_OCR:
+        all_text = []
+        max_tencent_pages = min(total_pages, 5)
+        all_tencent_ok = True
+        try:
+            for pg in range(max_tencent_pages):
+                pix = doc[pg].get_pixmap(matrix=MATRIX)
+                tmp = tempfile.mktemp(suffix=".png")
+                pix.save(tmp)
+                del pix
+                with open(tmp, 'rb') as f:
+                    img_b64 = base64.b64encode(f.read()).decode('utf-8')
+                tencent_result = _tencent_ocr_base64(img_b64)
+                if tencent_result and len(tencent_result) > 50:
+                    all_text.append(tencent_result)
+                    print(f"  P{pg+1}: Tencent OCR {len(tencent_result)} chars", flush=True)
+                else:
+                    all_tencent_ok = False
+                os.remove(tmp)
+            if all_tencent_ok and all_text:
+                doc.close()
+                return "\n".join(all_text)
+        except Exception as e:
+            print(f"  Tencent OCR failed: {e}", flush=True)
+
+    # Step 2: pdfplumber 提取文字（纯文本PDF兜底）
     try:
         import pdfplumber
-        parts = []
+        pdf_text = []
         with pdfplumber.open(path) as pdf:
             for pg in pdf.pages:
                 t = pg.extract_text()
                 if t and len(t.strip()) > 10:
-                    parts.append(t)
-        if parts:
-            return "\n".join(parts)
+                    pdf_text.append(t)
+        if pdf_text:
+            doc.close()
+            return "\n".join(pdf_text)
     except Exception as e:
-        print(f"[OCR pdfplumber] {e}", flush=True)
+        print(f"  pdfplumber failed: {e}", flush=True)
 
-    # Step 2: Scanned PDF - 逐页转图片 -> 腾讯云OCR优先，本地RapidOCR逐页兜底
-    import base64
+    # Step 3: 本地 RapidOCR 逐页兜底
     ocr_local = _get_ocr_img()
+    if not ocr_local:
+        doc.close()
+        return ""
     
     try:
         import fitz
@@ -602,9 +625,6 @@ class Handler(ThreadedHandler):
     def _analyze(self, body):
         import re
         txt = body.get("text", "")
-        # 清洗 OCR 文本
-        if len(txt) > 200:
-            txt = _clean_ocr_text(txt)
         if not txt:
             return {"success": False, "error": "No text"}
         text_chunk = txt[:3500]
@@ -622,7 +642,7 @@ class Handler(ThreadedHandler):
 5. 判决法院 - 法院全称
 6. 判决日期 - 格式如2025年3月15日
 7. 判决结果 - 简要概括判决结果
-8. 上期限 - 数字(默认15)
+8. 上诉期限 - 数字(默认15)
 9. 上诉法院 - 上诉至哪个法院
 
 判决书原文片段：
@@ -701,8 +721,6 @@ class Handler(ThreadedHandler):
         import re, threading, time
         info = body.get("info", {})
         ocr_text = body.get("ocr_text", "")
-        if len(ocr_text) > 200:
-            ocr_text = _clean_ocr_text(ocr_text)
         firm = "安徽国恒律师事务所"
         attorney = "赵光辉"
         stream_done = threading.Event()
