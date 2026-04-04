@@ -1,7 +1,8 @@
 {
   "/page": "app/page.js",
   "/confirm/page": "app/confirm/page.js",
-  "/result/page": "app/result/page.js",
   "/history/page": "app/history/page.js",
+  "/api/generate-appeal-stream/route": "app/api/generate-appeal-stream/route.js",
+  "/result/page": "app/result/page.js",
   "/flow/page": "app/flow/page.js"
 }

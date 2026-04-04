@@ -252,14 +252,13 @@ def _ocr_pdf(path):
     except Exception as e:
         print(f"[OCR pdfplumber] {e}", flush=True)
 
-    # Step 2: Scanned PDF - fitz + RapidOCR, one page at a time
-    ocr = _get_ocr_img()
-    if not ocr:
-        return ""
-
+    # Step 2: Scanned PDF - 逐页转图片 -> 腾讯云OCR优先，本地RapidOCR逐页兜底
+    import base64
+    ocr_local = _get_ocr_img()
+    
     try:
         import fitz
-        # 降低DPI: 1.2x = ~960px宽(A4)，OCR足够，内存减半
+        # 降低DPI: 1.2x = ~960px宽(A4)，OCR足够
         MATRIX = fitz.Matrix(1.2, 1.2)
         
         doc = fitz.open(path)
@@ -267,33 +266,47 @@ def _ocr_pdf(path):
         all_text = []
 
         for pg in range(total_pages):
-            # 渲染一页 -> 临时文件 -> OCR -> 立即释放
-            pix = None
-            tmp = None
+            pix = doc[pg].get_pixmap(matrix=MATRIX)
+            tmp = tempfile.mktemp(suffix=".png")
             try:
-                pix = doc[pg].get_pixmap(matrix=MATRIX)
-                tmp = tempfile.mktemp(suffix=".png")
                 pix.save(tmp)
-                del pix  # 立即释放Pixmap内存
-                pix = None
-
-                result = ocr(tmp)
-                if result and hasattr(result, 'txts'):
-                    texts = [t for t in result.txts if t and t.strip()]
-                    if texts:
-                        all_text.append("\n".join(texts))
+                del pix; pix = None
+                
+                # 1. 腾讯云 OCR 优先（高精度）
+                page_text = None
+                if USE_TENCENT_OCR:
+                    try:
+                        with open(tmp, 'rb') as f:
+                            img_b64 = base64.b64encode(f.read()).decode('utf-8')
+                        tencent_result = _tencent_ocr_base64(img_b64)
+                        if tencent_result and len(tencent_result) > 50:
+                            page_text = tencent_result
+                            print(f"  Page {pg+1}: Tencent OCR {len(tencent_result)} chars", flush=True)
+                    except Exception as e:
+                        print(f"  Page {pg+1}: Tencent OCR fallback: {e}", flush=True)
+                
+                # 2. Fallback 本地 RapidOCR
+                if not page_text and ocr_local:
+                    try:
+                        result = ocr_local(tmp)
+                        if result and hasattr(result, 'txts'):
+                            texts = [t for t in result.txts if t and t.strip()]
+                            if texts:
+                                page_text = "\n".join(texts)
+                                print(f"  Page {pg+1}: Local OCR {len(page_text)} chars", flush=True)
+                    except Exception as e:
+                        print(f"  Page {pg+1}: Local OCR error: {e}", flush=True)
+                
+                if page_text:
+                    all_text.append(page_text)
             except Exception as e:
                 print(f"[OCR page {pg}] {e}", flush=True)
             finally:
-                # 绝对确保临时文件和对象被清理
-                if tmp and os.path.exists(tmp):
+                if os.path.exists(tmp):
                     os.remove(tmp)
-                if pix is not None:
-                    del pix
                 gc.collect()
 
         doc.close()
-        del doc
         gc.collect()
 
         text = "\n".join(all_text)
