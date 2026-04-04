@@ -9,7 +9,7 @@ import json, sys, time, subprocess, socketserver, threading, shutil, tempfile, g
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # 模型配置
-OPENROUTER_MODEL = 'qwen/qwen3.6-plus:free'
+OPENROUTER_MODEL = 'google/gemma-3-4b-it:free'
 OAUTH_PATH = '/root/.openclaw/agents/main/agent/auth-profiles.json'
 if os.path.exists(OAUTH_PATH):
     with open(OAUTH_PATH) as f:
@@ -17,6 +17,13 @@ if os.path.exists(OAUTH_PATH):
     OPENROUTER_KEY = _auth.get('openrouter:default', {}).get('key', '')
 else:
     OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '')
+
+# 火山引擎方舟 (备用，无频率限制)
+VOLCENGINE_KEY = '2ca8da3c-39f4-42db-a082-74af87001b5e'
+VOLCENGINE_MODEL = 'doubao-seed-2-0-lite-260215'
+VOLCENGINE_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
+VOLCENGINE_REASONING = 'low'  # minimal, low, medium, high
+AI_PROVIDER = 'volcengine'  # openrouter 或 volcengine
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -247,23 +254,34 @@ _ai_call_lock = threading.Lock()
 # ===== AI 调用 =====
 def _call_ai_stream(prompt, system="", retries=2, callback=None):
     from urllib.request import Request, urlopen
+    global _last_ai_call
     with _ai_call_lock:
         elapsed = time.time() - _last_ai_call
         if elapsed < 3.0:
             time.sleep(3.0 - elapsed)
-        exec('_last_ai_call = time.time()')
-        exec('time.sleep(0.001)')  # ensure assignment
+        _last_ai_call = time.time()
 
     msgs = []
     if system:
         msgs.append({"role": "system", "content": system})
     msgs.append({"role": "user", "content": prompt})
-    body = json.dumps({"model": OPENROUTER_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25, "stream": True})
     last_err = ""
+    
     for attempt in range(retries + 1):
-        req = Request("https://openrouter.ai/api/v1/chat/completions", data=body.encode(), method="POST")
-        req.add_header("Content-Type", "application/json")
-        req.add_header("Authorization", f"Bearer {OPENROUTER_KEY}")
+        if AI_PROVIDER == 'volcengine':
+            # 火山方舟 API (openai 兼容格式)
+            body_dict = {"model": VOLCENGINE_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25, "stream": True}
+            body_dict["reasoning_effort"] = VOLCENGINE_REASONING
+            body = json.dumps(body_dict)
+            req = Request(VOLCENGINE_ENDPOINT, data=body.encode(), method="POST")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Authorization", f"Bearer {VOLCENGINE_KEY}")
+        else:
+            # OpenRouter API
+            body = json.dumps({"model": OPENROUTER_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25, "stream": True})
+            req = Request("https://openrouter.ai/api/v1/chat/completions", data=body.encode(), method="POST")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Authorization", f"Bearer {OPENROUTER_KEY}")
         try:
             resp = urlopen(req, timeout=30)
             buffer = b""
@@ -304,10 +322,12 @@ def _call_ai_stream(prompt, system="", retries=2, callback=None):
                                 pass
         except Exception as e:
             last_err = str(e)
-            if "429" in last_err and attempt < retries:
-                wait = (attempt + 1) * 5
-                time.sleep(wait)
-                continue
+            if "429" in last_err or "Too Many Requests" in last_err:
+                if attempt < retries:
+                    wait = (attempt + 1) * 10
+                    time.sleep(wait)
+                    continue
+                last_err = "Rate limited by OpenRouter (please retry later)" 
             if callback:
                 callback(f"[AI 调用失败: {last_err}]")
             return
@@ -421,12 +441,22 @@ class Handler(ThreadedHandler):
 
     def _ocr(self, body):
         path, fid = body.get("file_path",""), body.get("file_id","")
+        if not path and not fid:
+            return {"success": False, "error": "No file specified"}
         if not path:
             for f in os.listdir(UPLOAD_DIR):
                 if f.startswith(fid):
                     path = os.path.join(UPLOAD_DIR, f)
                     break
-        if not path or not os.path.exists(path):
+        if not path:
+            return {"success": False, "error": "No file specified"}
+        # 安全：限制只能访问 uploads 目录
+        real_path = os.path.realpath(path)
+        uploads_real = os.path.realpath(UPLOAD_DIR)
+        if not real_path.startswith(uploads_real):
+            print(f"[SECURITY] Path traversal blocked: {path}", flush=True)
+            return {"success": False, "error": "Access denied"}
+        if not os.path.exists(path):
             return {"success": False, "error": "File not found"}
         ext = os.path.splitext(path)[1].lower()
         text = ""
@@ -450,31 +480,31 @@ class Handler(ThreadedHandler):
         txt = body.get("text", "")
         if not txt:
             return {"success": False, "error": "No text"}
-        text_chunk = txt[:6000]
+        text_chunk = txt[:3500]
 
         REQUIRED_FIELDS = ["案号","案由","原告","被告","判决法院","判决日期","判决结果","上诉期限","上诉法院"]
 
         def build_prompt(extra=""):
-            return f"""你是一个专业的法律信息提取系统。从以下判决书中提取所有关键信息，严格返回JSON格式，所有字段都必须有值，不得遗漏：
+            return f"""请提取以下判决书的9个关键字段，返回JSON：
 
-{{
-  "案号": "判决书上的完整案号，如(2025)皖0406民初3597号",
-  "案由": "案件类型",
-  "原告": "原告全称",
-  "被告": "被告全称",
-  "判决法院": "作出判决的法院全称",
-  "判决日期": "判决书上载明的日期，格式为YYYY年MM月DD日",
-  "判决结果": "一审判决结果核心摘要",
-  "上诉期限": "法定期限数字(默认15天)",
-  "上诉法院": "上诉至哪个人民法院"
-}}
+需要提取的字段（必须都有值）：
+1. 案号 - 格式如(2025)皖0406民初3597号
+2. 案由 - 案件类型
+3. 原告 - 原告全称
+4. 被告 - 被告全称
+5. 判决法院 - 法院全称
+6. 判决日期 - 格式如2025年3月15日
+7. 判决结果 - 简要概括判决结果
+8. 上期限 - 数字(默认15)
+9. 上诉法院 - 上诉至哪个法院
 
-【重要】必须返回完整的JSON，9个字段每一个都必须有值，禁止空字符串，禁止省略任何字段。
+判决书原文片段：
+---
+{text_chunk}
+---
 
-{extra}
-
-判决书原文：
-{text_chunk}"""
+请直接返回JSON（用```json包裹）：
+{{"案号":"...","案由":"...","原告":"...","被告":"...","判决法院":"...","判决日期":"...","判决结果":"...","上诉期限":"15","上诉法院":"..."}}"""
 
         def try_parse(r):
             cl = r.strip()
@@ -511,7 +541,7 @@ class Handler(ThreadedHandler):
                 return None, str(e)
 
         prompt = build_prompt()
-        r = _call_ai(prompt, "你是法律信息提取AI。只返回纯JSON，不要任何其他文字。")
+        r = _call_ai(prompt, system="")
         info, err = try_parse(r)
 
         if info:
@@ -523,7 +553,7 @@ class Handler(ThreadedHandler):
             while missing and retry_count < 2:
                 retry_count += 1
                 prompt_retry = build_prompt(f"【注意】上次提取缺少以下字段，请从判决书中补充完整：{missing_str}")
-                r = _call_ai(prompt_retry, "你是法律信息提取AI。只返回纯JSON，不要任何其他文字。")
+                r = _call_ai(prompt_retry, system="")
                 info_retry, _ = try_parse(r)
                 if info_retry:
                     for f in missing:
@@ -751,5 +781,6 @@ class Handler(ThreadedHandler):
         return text
 
 if __name__ == "__main__":
-    print(f"AI Backend ({OPENROUTER_MODEL}): http://localhost:3457", flush=True)
+    model_name = VOLCENGINE_MODEL if AI_PROVIDER == 'volcengine' else OPENROUTER_MODEL
+    print(f"AI Backend ({model_name}, provider={AI_PROVIDER}): http://localhost:3457", flush=True)
     ThreadedTCPServer(("0.0.0.0", 3457), Handler).serve_forever()

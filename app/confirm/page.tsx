@@ -115,7 +115,10 @@ export default function ConfirmPage() {
     }
     if (ocr && !info.判决日期) {
       const dateStr = parseDate(ocr)
-      if (dateStr) handleFieldChange('判决日期', dateStr)
+      if (dateStr) {
+        calcDeadline(dateStr, parsedInfo.上诉期限 || '15')
+        setInfo(prev => ({ ...prev, 判决日期: dateStr }))
+      }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
