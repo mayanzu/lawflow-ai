@@ -32,12 +32,12 @@ export default function Home() {
           if (data.file_path) localStorage.setItem('lw_file_path', data.file_path)
           setTimeout(() => router.push(`/flow?file=${encodeURIComponent(file.name)}&t=${Date.now()}`), 500)
         } else {
-          setErrorMsg(data.error || 'Upload failed')
+          setErrorMsg(data.error || '上传失败')
           setUploadPct(-1)
         }
-      } catch { setErrorMsg('Upload response parse failed'); setUploadPct(-1) }
+      } catch { setErrorMsg('上传响应解析失败'); setUploadPct(-1) }
     }
-    xhr.onerror = () => { setErrorMsg('Network error'); setUploadPct(-1) }
+    xhr.onerror = () => { setErrorMsg('网络错误'); setUploadPct(-1) }
     xhr.send(formData)
   }
 
@@ -65,7 +65,7 @@ export default function Home() {
           animate={{ rotate: 360 }}
           transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
         />
-        <p style={{ fontSize: 15, fontWeight: 500, color: '#1D1D1F', marginTop: 20, marginBottom: 4 }}>{uploadPct < 100 ? 'Uploading' : 'Redirecting...'}</p>
+        <p style={{ fontSize: 15, fontWeight: 500, color: '#1D1D1F', marginTop: 20, marginBottom: 4 }}>{uploadPct < 100 ? '正在上传' : '跳转中...'}</p>
         {uploadPct > 0 && (
           <div style={{ width: 200, height: 3, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden', marginTop: 12 }}>
             <motion.div style={{ height: '100%', background: '#0071E3', borderRadius: 2 }} animate={{ width: `${uploadPct}%` }} transition={{ duration: 0.15 }} />
@@ -77,26 +77,26 @@ export default function Home() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-      {/* Navigation */}
+      {/* 导航栏 */}
       <nav style={{ backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', background: 'rgba(255,255,255,0.85)', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
         <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 52 }}>
-          <span style={{ fontSize: 17, fontWeight: 600, color: '#1D1D1F', letterSpacing: '-0.02em' }}>LawFlow</span>
-          <button onClick={() => router.push('/history')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0071E3', fontWeight: 500, padding: '6px 12px', borderRadius: 980 }}>History</button>
+          <span style={{ fontSize: 17, fontWeight: 600, color: '#1D1D1F', letterSpacing: '-0.02em' }}>诉状助手</span>
+          <button onClick={() => router.push('/history')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0071E3', fontWeight: 500, padding: '6px 12px', borderRadius: 980 }}>历史记录</button>
         </div>
       </nav>
 
-      {/* Hero */}
+      {/* 主区域 */}
       <main style={{ maxWidth: 980, margin: '0 auto', padding: '80px 24px 0' }}>
         <div style={{ textAlign: 'center', maxWidth: 640, margin: '0 auto' }}>
           <h1 style={{ fontSize: 'clamp(32px, 5vw, 56px)', fontWeight: 700, lineHeight: 1.08, letterSpacing: '-0.04em', color: '#1D1D1F', margin: '0 0 16px' }}>
-            Upload your judgment document
+            一键生成民事上诉状
           </h1>
           <p style={{ fontSize: 'clamp(16px, 2vw, 20px)', lineHeight: 1.5, color: '#6E6E73', margin: 0, fontWeight: 400 }}>
-            AI automatically extracts case details and generates a formatted civil appeal petition.
+            上传一审判决书，AI 自动提取案件信息，生成规范的民事上诉状
           </p>
         </div>
 
-        {/* Upload Area */}
+        {/* 上传区域 */}
         <div style={{ maxWidth: 520, margin: '48px auto 0', padding: '0 16px' }}>
           <AnimatePresence>
             {errorMsg && (
@@ -127,7 +127,7 @@ export default function Home() {
           >
             {uploading ? (
               <div>
-                <div style={{ fontSize: 15, fontWeight: 600, color: '#1D1D1F', marginBottom: 16 }}>Uploading document</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#1D1D1F', marginBottom: 16 }}>正在上传</div>
                 <div style={{ width: 240, height: 4, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden', margin: '0 auto 12px' }}>
                   <motion.div style={{ height: '100%', background: '#0071E3', borderRadius: 2 }} animate={{ width: `${uploadPct}%` }} transition={{ duration: 0.15 }} />
                 </div>
@@ -135,10 +135,10 @@ export default function Home() {
               </div>
             ) : (
               <div>
-                <p style={{ fontSize: 15, fontWeight: 500, color: '#1D1D1F', margin: '0 0 6px' }}>{isDragActive ? 'Drop your file' : 'Drag and drop your document'}</p>
-                <p style={{ fontSize: 13, color: '#86868B', margin: '0 0 24px' }}>PDF, PNG, JPG up to 50MB</p>
+                <p style={{ fontSize: 15, fontWeight: 500, color: '#1D1D1F', margin: '0 0 6px' }}>{isDragActive ? '松开上传' : '拖拽文件到此处或点击上传'}</p>
+                <p style={{ fontSize: 13, color: '#86868B', margin: '0 0 24px' }}>支持 PDF、PNG、JPG，最大 50MB</p>
                 <label htmlFor="file-upload" style={{ display: 'inline-block', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, padding: '13px 28px', fontSize: 15, fontWeight: 500, cursor: 'pointer', letterSpacing: '-0.01em', transition: 'background 0.2s' }}>
-                  Select File
+                  选择文件
                 </label>
                 <input id="file-upload" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={onFileChange} style={{ display: 'none' }} />
               </div>
@@ -146,17 +146,17 @@ export default function Home() {
           </div>
         </div>
 
-        {/* Process steps */}
+        {/* 流程说明 */}
         <div style={{ maxWidth: 560, margin: '64px auto 0', padding: '0 16px 100px' }}>
-          <p style={{ fontSize: 12, fontWeight: 600, color: '#0071E3', textAlign: 'center', marginBottom: 28, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Process</p>
+          <p style={{ fontSize: 12, fontWeight: 600, color: '#0071E3', textAlign: 'center', marginBottom: 28, letterSpacing: '0.06em', textTransform: 'uppercase' }}>处理流程</p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
             {[
-              { step: '01', title: 'OCR', desc: 'Recognize scanned documents' },
-              { step: '02', title: 'AI Analysis', desc: 'Extract case details' },
-              { step: '03', title: 'Appeal Petition', desc: 'Generate formatted document' },
+              { step: '01', title: 'OCR 识别', desc: '高精度识别扫描件' },
+              { step: '02', title: 'AI 分析', desc: '自动提取案件信息' },
+              { step: '03', title: '生成诉状', desc: '输出规范化法律文书' },
             ].map((f) => (
               <div key={f.step} style={{ background: '#F5F5F7', borderRadius: 16, padding: '24px 20px', textAlign: 'center' }}>
-                <div style={{ fontSize: 10, fontWeight: 600, color: '#86868B', marginBottom: 8, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{f.step}</div>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#86868B', marginBottom: 8, letterSpacing: '0.08em' }}>{f.step}</div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: '#1D1D1F', marginBottom: 6, letterSpacing: '-0.02em' }}>{f.title}</div>
                 <div style={{ fontSize: 12, color: '#86868B', lineHeight: 1.5 }}>{f.desc}</div>
               </div>

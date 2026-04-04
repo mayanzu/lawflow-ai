@@ -13,9 +13,9 @@ interface Step {
 }
 
 const STEPS = [
-  { id: 'upload', title: 'Upload' },
-  { id: 'ocr', title: 'OCR' },
-  { id: 'analyze', title: 'AI Analysis' },
+  { id: 'upload', title: '上传' },
+  { id: 'ocr', title: 'OCR 识别' },
+  { id: 'analyze', title: 'AI 分析' },
 ]
 
 function sleep(ms: number) { return new Promise<void>(r => setTimeout(r, ms)) }
@@ -43,10 +43,10 @@ function FlowContent() {
 
   async function callApi(url: string, body: any) {
     for (let attempt = 0; attempt <= 2; attempt++) {
-      if (abortRef.current?.signal.aborted) throw new Error('Cancelled')
+      if (abortRef.current?.signal.aborted) throw new Error('请求已取消')
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: abortRef.current?.signal })
       if (res.status === 429) {
-        if (attempt === 2) throw new Error('Rate limited')
+        if (attempt === 2) throw new Error('API 频率超限')
         const wait = (attempt + 1) * 8000
         setRateLimit(true); setRetryAfter(Math.ceil(wait / 1000))
         if (countdownRef.current) clearInterval(countdownRef.current)
@@ -54,48 +54,48 @@ function FlowContent() {
           setRetryAfter(prev => { if (prev <= 1) { clearInterval(countdownRef.current!); setRateLimit(false); return 0 }; return prev - 1 })
         }, 1000)
         await sleep(wait)
-        if (abortRef.current?.signal.aborted) throw new Error('Cancelled')
+        if (abortRef.current?.signal.aborted) throw new Error('请求已取消')
         continue
       }
-      if (!res.ok) throw new Error(`Request failed: ${res.status}`)
+      if (!res.ok) throw new Error(`请求失败: ${res.status}`)
       return res.json()
     }
-    throw new Error('Request failed')
+    throw new Error('请求失败')
   }
 
   async function processFile() {
     if (processRef.current) return
     processRef.current = true
 
-    setStepStatus(0, 'done', 100, 'Complete')
+    setStepStatus(0, 'done', 100, '完成')
 
     let text = ''
     // OCR
-    setStepStatus(1, 'active', 10, 'Recognizing...')
+    setStepStatus(1, 'active', 10, '正在识别...')
     try {
       const ocrRes = await callApi('/api/ocr', { file_id: fileIdRef.current })
-      if (!ocrRes.success) throw new Error(ocrRes.error || 'OCR failed')
+      if (!ocrRes.success) throw new Error(ocrRes.error || 'OCR 识别失败')
       text = ocrRes.text || ''
       setOcrText(text)
       localStorage.setItem('lw_ocr_text', text)
-      setStepStatus(1, 'done', 100, `${text.length.toLocaleString()} characters extracted`)
+      setStepStatus(1, 'done', 100, `已识别 ${text.length.toLocaleString()} 字`)
     } catch (err: any) {
-      if (err.message === 'Cancelled') return
-      setStepStatus(1, 'error', 0, err.message); setError(`OCR failed: ${err.message}`); return
+      if (err.message === '请求已取消') return
+      setStepStatus(1, 'error', 0, err.message); setError(`OCR 识别失败: ${err.message}`); return
     }
 
-    // AI Analysis
-    setStepStatus(2, 'active', 10, 'Analyzing...')
+    // AI 分析
+    setStepStatus(2, 'active', 10, '正在分析...')
     try {
       const analyzeRes = await callApi('/api/analyze', { text })
       if (analyzeRes.success && analyzeRes.info) {
         localStorage.setItem('lw_analyze_info', JSON.stringify(analyzeRes.info))
-        setStepStatus(2, 'done', 100, 'Complete')
+        setStepStatus(2, 'done', 100, '完成')
       } else {
-        setStepStatus(2, 'done', 100, 'Complete (manual fill available)')
+        setStepStatus(2, 'done', 100, '完成（可手动填写）')
       }
     } catch {
-      setStepStatus(2, 'done', 100, 'Complete (manual fill available)')
+      setStepStatus(2, 'done', 100, '完成（可手动填写）')
     }
 
     setTimeout(() => router.push('/confirm'), 1000)
@@ -113,21 +113,21 @@ function FlowContent() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-      {/* Navigation */}
+      {/* 导航栏 */}
       <nav style={{ backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', background: 'rgba(255,255,255,0.85)', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
         <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 52 }}>
-          <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); abortRef.current?.abort(); router.push('/') }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0071E3', fontWeight: 500 }}>Back</button>
+          <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); abortRef.current?.abort(); router.push('/') }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0071E3', fontWeight: 500 }}>返回</button>
           <span style={{ fontSize: 13, color: '#86868B', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</span>
           <div style={{ width: 40 }} />
         </div>
       </nav>
 
-      {/* Main Content */}
+      {/* 主内容 */}
       <main style={{ maxWidth: 680, margin: '0 auto', padding: '48px 24px 80px' }}>
-        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px', letterSpacing: '-0.03em' }}>Processing</h1>
-        <p style={{ fontSize: 15, color: '#86868B', margin: '0 0 40px' }}>{error ? error : 'Please wait while we process your document.'}</p>
+        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px', letterSpacing: '-0.03em' }}>正在处理</h1>
+        <p style={{ fontSize: 15, color: '#86868B', margin: '0 0 40px' }}>{error ? error : '请稍候，系统正在处理您的文件。'}</p>
 
-        {/* Steps */}
+        {/* 步骤列表 */}
         <div style={{ background: '#F8F9FA', borderRadius: 16, padding: 24, marginBottom: 24 }}>
           {steps.map((step, i) => (
             <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: 16, paddingBottom: i < steps.length - 1 ? 20 : 0, marginBottom: i < steps.length - 1 ? 20 : 0, borderBottom: i < steps.length - 1 ? '1px solid #E8E8ED' : 'none' }}>
@@ -147,21 +147,21 @@ function FlowContent() {
                 )}
               </div>
               <div style={{ fontSize: 12, fontWeight: 600, color: step.status === 'done' ? '#0071E3' : step.status === 'error' ? '#D93025' : '#86868B', minWidth: 40, textAlign: 'right' }}>
-                {step.status === 'done' ? 'Done' : step.status === 'error' ? 'Error' : step.status === 'active' ? '...' : 'Pending'}
+                {step.status === 'done' ? '完成' : step.status === 'error' ? '错误' : step.status === 'active' ? '处理中' : '等待'}
               </div>
             </div>
           ))}
         </div>
 
-        {/* OCR Preview */}
+        {/* OCR 结果预览 */}
         {ocrText && (
           <div style={{ background: '#F8F9FA', borderRadius: 16, overflow: 'hidden' }}>
             <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setOcrExpanded(v => !v)}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 2 }}>OCR Result</div>
-                <div style={{ fontSize: 13, color: '#86868B' }}>{ocrText.length.toLocaleString()} characters</div>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', marginBottom: 2 }}>OCR 识别结果</div>
+                <div style={{ fontSize: 13, color: '#86868B' }}>{ocrText.length.toLocaleString()} 字</div>
               </div>
-              <div style={{ fontSize: 12, color: '#0071E3', fontWeight: 500 }}>{ocrExpanded ? 'Collapse' : 'Expand'}</div>
+              <div style={{ fontSize: 12, color: '#0071E3', fontWeight: 500 }}>{ocrExpanded ? '收起' : '展开'}</div>
             </div>
             {ocrExpanded && (
               <div style={{ padding: '0 20px 16px', maxHeight: 280, overflow: 'auto', background: '#FFFFFF', borderRadius: '0 0 16px 16px' }}>
@@ -171,13 +171,13 @@ function FlowContent() {
           </div>
         )}
 
-        {/* Error */}
+        {/* 错误提示 */}
         {(error || rateLimit) && (
           <div style={{ marginTop: 24, padding: '16px 20px', background: '#FEF0EF', borderRadius: 14, border: '1px solid #F5C6C5' }}>
-            <div style={{ fontSize: 13, color: '#D93025', marginBottom: 16 }}>{rateLimit ? `Rate limited. Retry in ${retryAfter}s...` : error}</div>
+            <div style={{ fontSize: 13, color: '#D93025', marginBottom: 16 }}>{rateLimit ? `请求过于频繁，${retryAfter} 秒后重试...` : error}</div>
             <div style={{ display: 'flex', gap: 10 }}>
-              {!rateLimit && <button onClick={() => { processRef.current = false; processFile() }} style={{ flex: 1, padding: '10px 16px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>Retry</button>}
-              <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); router.push('/') }} style={{ flex: 1, padding: '10px 16px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>Upload New</button>
+              {!rateLimit && <button onClick={() => { processRef.current = false; processFile() }} style={{ flex: 1, padding: '10px 16px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>重试</button>}
+              <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); router.push('/') }} style={{ flex: 1, padding: '10px 16px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>重新上传</button>
             </div>
           </div>
         )}
