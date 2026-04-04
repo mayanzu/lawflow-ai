@@ -270,6 +270,20 @@ def _ocr_image(path):
     return ""
 
 
+def _clean_ocr_text(text):
+    """用 LLM 清洗 OCR 结果：去除水印噪点、修复错别字"""
+    if not text or len(text) < 50:
+        return text
+    system = "你是一个专业的法律文书校对助手。请对以下OCR识别的法律文书文本进行清洗。要求：\n1. 删除OCR水印、导航条、电话号码等噪点文字（如页眉、页脚、网址等）\n2. 修复形近字错误（如〇和0、己和已）\n3. 去除多余换行和分隔符\n4. 保持原文的法律文书结构和内容不变\n\n只返回清洗后的文本，不要任何其他说明。"
+    try:
+        cleaned = _call_ai(text, system=system, retries=1)
+        if cleaned and len(cleaned.strip()) > len(text) * 0.3:
+            return cleaned.strip()
+    except:
+        pass
+    return text
+
+
 def _ocr_pdf(path):
     """PDF OCR:
     1. 先用 pdfplumber 提取文字（纯文本PDF，秒级）
@@ -588,6 +602,9 @@ class Handler(ThreadedHandler):
     def _analyze(self, body):
         import re
         txt = body.get("text", "")
+        # 清洗 OCR 文本
+        if len(txt) > 200:
+            txt = _clean_ocr_text(txt)
         if not txt:
             return {"success": False, "error": "No text"}
         text_chunk = txt[:3500]
@@ -684,6 +701,8 @@ class Handler(ThreadedHandler):
         import re, threading, time
         info = body.get("info", {})
         ocr_text = body.get("ocr_text", "")
+        if len(ocr_text) > 200:
+            ocr_text = _clean_ocr_text(ocr_text)
         firm = "安徽国恒律师事务所"
         attorney = "赵光辉"
         stream_done = threading.Event()
