@@ -83,7 +83,9 @@ export default function HistoryPage() {
           <div style={{ textAlign: 'center', padding: '60px 0', color: '#86868B', fontSize: '14px' }}>加载中...</div>
         ) : history.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '60px 20px', background: '#FFF', borderRadius: 16 }}>
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+            <div style={{ fontSize: 40, marginBottom: 12, width: 40, height: 40, borderRadius: '50%', border: '3px solid #E0E0E0', margin: '0 auto 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="2" width="14" height="16" rx="2" stroke="#86868B" strokeWidth="1.5"/><line x1="7" y1="7" x2="13" y2="7" stroke="#86868B" strokeWidth="1.2"/><line x1="7" y1="10" x2="13" y2="10" stroke="#86868B" strokeWidth="1.2"/><line x1="7" y1="13" x2="10" y2="13" stroke="#86868B" strokeWidth="1.2"/></svg>
+            </div>
             <p style={{ fontSize: '15px', fontWeight: 600, color: '#1D1D1F', marginBottom: 6 }}>暂无历史记录</p>
             <p style={{ fontSize: '13px', color: '#86868B', marginBottom: 20 }}>处理完成的案件会自动保存在此处</p>
             <button onClick={() => router.push('/')} style={{ padding: '10px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, cursor: 'pointer', fontSize: '14px', fontWeight: 600 }}>开始第一个任务</button>
