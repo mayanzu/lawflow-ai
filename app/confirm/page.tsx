@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 interface Info {
@@ -42,13 +42,6 @@ export default function ConfirmPage() {
       if (y > 1990 && y < 2031 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31)
         return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`
     }
-    const m2 = s.match(/([零〇一二三四五六七八九十]+)年([零〇一二三四五六七八九十]+)月([零〇一二三四五六七八九十]+)日/)
-    if (m2) {
-      let y = cnToInt(m2[1]), mo = cnToInt(m2[2]), d = cnToInt(m2[3])
-      if (y < 100) y += 2000
-      if (y > 1990 && y < 2031 && mo >= 1 && mo <= 12 && d >= 1 && d <= 31)
-        return `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`
-    }
     return null
   }
 
@@ -72,7 +65,6 @@ export default function ConfirmPage() {
 
   async function handleGenerate() {
     setGenerating(true)
-    // 保存信息并立即跳转到结果页
     localStorage.setItem('lw_analyze_info', JSON.stringify(info))
     router.push('/result')
   }
@@ -83,17 +75,17 @@ export default function ConfirmPage() {
     if (raw) {
       try {
         const parsed = JSON.parse(raw)
-        const parsedInfo: Info = {
+        const info: Info = {
           案号: parsed.案号||'', 案由: parsed.案由||'', 原告: parsed.原告||'',
           被告: parsed.被告||'', 判决法院: parsed.判决法院||'',
           判决结果: parsed.判决结果||'', 上诉期限: parsed.上诉期限||'',
           上诉法院: parsed.上诉法院||'', 判决日期: parsed.判决日期||''
         }
-        setInfo(parsedInfo)
-        if (parsedInfo.判决日期 || parsedInfo.上诉期限)
-          calcDeadline(parsedInfo.判决日期 || '2024-01-01', parsedInfo.上诉期限 || '15')
-        if (!parsed.上诉法院 && parsed.判决法院) {
-          let court = parsed.判决法院, appealCourt = ''
+        setInfo(info)
+        if (info.判决日期 || info.上诉期限)
+          calcDeadline(info.判决日期 || '2024-01-01', info.上诉期限 || '15')
+        if (!info.上诉法院 && info.判决法院) {
+          let court = info.判决法院, appealCourt = ''
           for (const muni of ['北京','上海','天津','重庆']) {
             if (court.startsWith(muni)) {
               if (court.includes('区人民法院')) appealCourt = muni + '市中级人民法院'
@@ -125,31 +117,41 @@ export default function ConfirmPage() {
 
   const isUrgent = daysLeft !== null && daysLeft <= 7
   const isExpired = daysLeft !== null && daysLeft <= 0
-  const inputStyle: React.CSSProperties = { width: '100%', padding: '10px 12px', border: '1px solid #E0E0E0', borderRadius: 8, fontSize: 14, fontFamily: 'inherit', color: '#1D1D1F', outline: 'none', boxSizing: 'border-box', background: '#FFF' }
-  const labelStyle: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: '#86868B', display: 'block', marginBottom: 6 }
-  const sectionTitle: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: '#86868B', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 14, paddingBottom: 8, borderBottom: '1px solid #F0F0F0' }
+
+  const inputStyle: React.CSSProperties = { width: '100%', padding: '12px 14px', border: '1px solid #E0E0E0', borderRadius: 10, fontSize: 14, fontFamily: 'inherit', color: '#1D1D1F', outline: 'none', boxSizing: 'border-box', background: '#FFF' }
+  const labelStyle: React.CSSProperties = { fontSize: 11, fontWeight: 600, color: '#86868B', display: 'block', marginBottom: 6, letterSpacing: '0.04em', textTransform: 'uppercase' }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F8F9FA', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-      <div style={{ padding: '12px 16px', background: '#FFF', borderBottom: '1px solid #E8EAED', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <button onClick={() => router.push('/flow')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, fontWeight: 600, color: '#1D1D1F', padding: '8px 0' }}>← 返回</button>
-        <span style={{ fontSize: 14, color: '#86868B' }}>案件信息确认</span>
-        <div style={{ width: 50 }} />
-      </div>
-
-      {daysLeft !== null && (
-        <div style={{ margin: '16px 16px 0', padding: '12px 16px', borderRadius: 10, background: isExpired ? '#FEF0EF' : isUrgent ? '#FFF3E0' : '#E8F5E9', border: `1px solid ${isExpired ? '#F5C6C5' : isUrgent ? '#FFE0B2' : '#C8E6C9'}` }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: isExpired ? '#D93025' : isUrgent ? '#E65100' : '#2E7D32', marginBottom: 2 }}>
-            {isExpired ? '上诉期已届满' : `上诉期限：剩余 ${daysLeft} 天`}
-          </div>
-          <div style={{ fontSize: 11, color: '#86868B' }}>判决日期：{info.判决日期 || '未填写'} &nbsp;|&nbsp; 届满：{appealDeadline ? new Date(appealDeadline).toLocaleDateString('zh-CN') : '—'}</div>
+    <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
+      {/* Navigation */}
+      <nav style={{ backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', background: 'rgba(255,255,255,0.85)', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+        <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 52 }}>
+          <button onClick={() => router.push('/flow')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0071E3', fontWeight: 500 }}>Back</button>
+          <span style={{ fontSize: 15, fontWeight: 600, color: '#1D1D1F', letterSpacing: '-0.02em' }}>Case Details</span>
+          <div style={{ width: 40 }} />
         </div>
-      )}
+      </nav>
 
-      <div style={{ padding: '16px 16px 80px', maxWidth: 600, margin: '0 auto' }}>
-        <div style={{ background: '#FFF', borderRadius: 14, padding: '16px', marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
-          <h3 style={sectionTitle}>基本信息</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <main style={{ maxWidth: 680, margin: '0 auto', padding: '40px 24px 80px' }}>
+        {/* Deadline Banner */}
+        {daysLeft !== null && (
+          <div style={{ marginBottom: 32, padding: '16px 20px', borderRadius: 14,
+            background: isExpired ? '#FEF0EF' : isUrgent ? '#FFF8F0' : '#F0F9F0',
+            border: `1px solid ${isExpired ? '#F5C6C5' : isUrgent ? '#FFE0B2' : '#C8E6C9'}`
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: isExpired ? '#D93025' : isUrgent ? '#E65100' : '#2E7D32', marginBottom: 4 }}>
+              {isExpired ? 'Appeal period expired' : `${daysLeft} days remaining`}
+            </div>
+            <div style={{ fontSize: 12, color: '#86868B' }}>
+              Judgment: {info.判决日期 || 'Not specified'} | Deadline: {appealDeadline ? new Date(appealDeadline).toLocaleDateString('zh-CN') : '--'}
+            </div>
+          </div>
+        )}
+
+        {/* Basic Info */}
+        <section style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 12, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #F0F0F0' }}>Case Information</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
             {(['案号','案由','判决法院','判决日期'] as const).map(field => (
               <div key={field}>
                 <label style={labelStyle}>{field}</label>
@@ -157,40 +159,50 @@ export default function ConfirmPage() {
               </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        <div style={{ background: '#FFF', borderRadius: 14, padding: '16px', marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
-          <h3 style={sectionTitle}>当事人信息</h3>
-          <div style={{ marginBottom: 12 }}>
-            <label style={labelStyle}>原告（上诉人）</label>
+        {/* Parties */}
+        <section style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 12, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #F0F0F0' }}>Parties</h2>
+          <div style={{ marginBottom: 16 }}>
+            <label style={labelStyle}>Plaintiff</label>
             <input value={info.原告} onChange={e => handleFieldChange('原告', e.target.value)} style={inputStyle} />
           </div>
           <div>
-            <label style={labelStyle}>被告（被上诉人）</label>
+            <label style={labelStyle}>Defendant</label>
             <input value={info.被告} onChange={e => handleFieldChange('被告', e.target.value)} style={inputStyle} />
           </div>
-        </div>
+        </section>
 
-        <div style={{ background: '#FFF', borderRadius: 14, padding: '16px', marginBottom: 14, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
-          <h3 style={sectionTitle}>上诉信息</h3>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <div><label style={labelStyle}>上诉期限（天）</label><input type="number" value={info.上诉期限} onChange={e => handleFieldChange('上诉期限', e.target.value)} placeholder="15" style={inputStyle} /></div>
-            <div><label style={labelStyle}>上诉法院</label><input value={info.上诉法院} onChange={e => handleFieldChange('上诉法院', e.target.value)} style={inputStyle} /></div>
+        {/* Appeal Info */}
+        <section style={{ marginBottom: 24 }}>
+          <h2 style={{ fontSize: 12, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #F0F0F0' }}>Appeal</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            <div>
+              <label style={labelStyle}>Period (days)</label>
+              <input type="number" value={info.上诉期限} onChange={e => handleFieldChange('上诉期限', e.target.value)} placeholder="15" style={inputStyle} />
+            </div>
+            <div>
+              <label style={labelStyle}>Appeal Court</label>
+              <input value={info.上诉法院} onChange={e => handleFieldChange('上诉法院', e.target.value)} style={inputStyle} />
+            </div>
           </div>
-        </div>
+        </section>
 
-        <div style={{ background: '#FFF', borderRadius: 14, padding: '16px', marginBottom: 20, boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
-          <h3 style={sectionTitle}>一审判决结果（摘要）</h3>
-          <textarea value={info.判决结果} onChange={e => handleFieldChange('判决结果', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.7 }} placeholder="请简要填写..." />
-        </div>
+        {/* Judgment */}
+        <section style={{ marginBottom: 40 }}>
+          <h2 style={{ fontSize: 12, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid #F0F0F0' }}>Judgment Summary</h2>
+          <textarea value={info.判决结果} onChange={e => handleFieldChange('判决结果', e.target.value)} rows={3} style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.7 }} placeholder="Brief description..." />
+        </section>
 
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => router.push('/flow')} style={{ flex: 1, padding: '14px', background: '#FFF', color: '#1D1D1F', border: '1px solid #E0E0E0', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500, minHeight: 48 }}>返回修改</button>
-          <button onClick={handleGenerate} disabled={generating} style={{ flex: 2, padding: '14px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: generating ? 'wait' : 'pointer', fontSize: 15, fontWeight: 600, minHeight: 48, opacity: generating ? 0.6 : 1 }}>
-            {generating ? '生成中...' : '生成上诉状'}
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 12 }}>
+          <button onClick={() => router.push('/flow')} style={{ flex: 1, padding: '14px 20px', background: '#FFF', color: '#1D1D1F', border: '1px solid #E0E0E0', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500, letterSpacing: '-0.01em' }}>Edit Details</button>
+          <button onClick={handleGenerate} disabled={generating} style={{ flex: 2, padding: '14px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: generating ? 'wait' : 'pointer', fontSize: 15, fontWeight: 600, letterSpacing: '-0.01em', opacity: generating ? 0.6 : 1 }}>
+            {generating ? 'Generating...' : 'Generate Appeal'}
           </button>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

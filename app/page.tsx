@@ -8,40 +8,36 @@ export default function Home() {
   const [uploadPct, setUploadPct] = useState(-1)
   const [isDragActive, setIsDragActive] = useState(false)
   const [errorMsg, setErrorMsg] = useState('')
+  const [isTransitioning, setIsTransitioning] = useState(false)
 
   const doUpload = (file: File) => {
     setErrorMsg('')
-    // 清理旧数据
+    setIsTransitioning(true)
     Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k))
     localStorage.setItem('lw_file_name', file.name)
     localStorage.setItem('lw_file_size', String(file.size))
 
-    // 显示全屏上传进度
     setUploadPct(0)
-
     const formData = new FormData()
     formData.append('file', file)
     const xhr = new XMLHttpRequest()
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) setUploadPct(Math.round((e.loaded / e.total) * 100))
-    }
+    xhr.open('POST', '/api/upload')
+    xhr.upload.onprogress = (e) => { if (e.lengthComputable) setUploadPct(Math.round((e.loaded / e.total) * 100)) }
     xhr.onload = () => {
+      setUploadPct(100)
       try {
         const data = JSON.parse(xhr.responseText)
         if (data.success) {
           localStorage.setItem('lw_file_id', data.file_id)
           if (data.file_path) localStorage.setItem('lw_file_path', data.file_path)
-          setUploadPct(100)
-          // 上传完成后再跳转（无等待）
-          setTimeout(() => router.push(`/flow?file=${encodeURIComponent(file.name)}&t=${Date.now()}`), 200)
+          setTimeout(() => router.push(`/flow?file=${encodeURIComponent(file.name)}&t=${Date.now()}`), 500)
         } else {
-          setErrorMsg(data.error || '上传失败')
+          setErrorMsg(data.error || 'Upload failed')
           setUploadPct(-1)
         }
-      } catch { setErrorMsg('上传响应解析失败'); setUploadPct(-1) }
+      } catch { setErrorMsg('Upload response parse failed'); setUploadPct(-1) }
     }
-    xhr.onerror = () => { setErrorMsg('网络错误，请检查连接后重试'); setUploadPct(-1) }
-    xhr.open('POST', '/api/upload')
+    xhr.onerror = () => { setErrorMsg('Network error'); setUploadPct(-1) }
     xhr.send(formData)
   }
 
@@ -61,112 +57,113 @@ export default function Home() {
   const onDragLeave = (e: React.DragEvent) => { e.preventDefault(); setIsDragActive(false) }
   const uploading = uploadPct >= 0
 
-  // 上传中：全屏动画
-  if (uploading) {
+  if (isTransitioning) {
     return (
-      <div style={{ minHeight: '100vh', background: '#FFFFFF', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: 'inherit' }}>
-        <div style={{ textAlign: 'center', padding: '0 24px', width: '100%', maxWidth: '400px' }}>
-          <div style={{ width: 48, height: 48, borderRadius: '50%', border: '3px solid #F0F0F0', borderTopColor: '#0071E3', animation: 'spin 0.8s linear infinite', margin: '0 auto 24px' }} />
-          <h2 style={{ fontSize: 'clamp(18px, 2.5vw, 22px)', fontWeight: 700, color: '#1D1D1F', marginBottom: '8px' }}>文件上传中</h2>
-          <p style={{ fontSize: 'clamp(13px, 1.8vw, 15px)', color: '#86868B', marginBottom: '24px', minHeight: 20 }}>{uploadPct < 100 ? '上传完成后自动进入分析' : '正在跳转...'}</p>
-          <div style={{ width: '100%', maxWidth: '280px', height: 4, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden', margin: '0 auto' }}>
+      <div style={{ minHeight: '100vh', background: '#FFFFFF', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
+        <motion.div
+          style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid #F0F0F0', borderTopColor: '#0071E3' }}
+          animate={{ rotate: 360 }}
+          transition={{ duration: 0.8, repeat: Infinity, ease: 'linear' }}
+        />
+        <p style={{ fontSize: 15, fontWeight: 500, color: '#1D1D1F', marginTop: 20, marginBottom: 4 }}>{uploadPct < 100 ? 'Uploading' : 'Redirecting...'}</p>
+        {uploadPct > 0 && (
+          <div style={{ width: 200, height: 3, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden', marginTop: 12 }}>
             <motion.div style={{ height: '100%', background: '#0071E3', borderRadius: 2 }} animate={{ width: `${uploadPct}%` }} transition={{ duration: 0.15 }} />
           </div>
-          <p style={{ fontSize: 'clamp(18px, 3vw, 24px)', fontWeight: 700, color: '#0071E3', marginTop: '12px' }}>{uploadPct}%</p>
-        </div>
-        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        )}
       </div>
     )
   }
 
   return (
-    <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: 'inherit' }}>
-      {/* 导航栏 */}
-      <div style={{ padding: 'clamp(12px, 2vw, 16px) clamp(16px, 3vw, 32px)', borderBottom: '1px solid #F5F5F7', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 'clamp(16px, 2vw, 19px)', fontWeight: 600, color: '#1D1D1F' }}>诉状助手</span>
-        <button onClick={() => router.push('/history')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 'clamp(13px, 1.8vw, 15px)', color: '#0071E3', fontWeight: 500, padding: '8px 4px' }}>历史记录</button>
-      </div>
+    <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
+      {/* Navigation */}
+      <nav style={{ backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', background: 'rgba(255,255,255,0.85)', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+        <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 52 }}>
+          <span style={{ fontSize: 17, fontWeight: 600, color: '#1D1D1F', letterSpacing: '-0.02em' }}>LawFlow</span>
+          <button onClick={() => router.push('/history')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0071E3', fontWeight: 500, padding: '6px 12px', borderRadius: 980 }}>History</button>
+        </div>
+      </nav>
 
-      {/* 标题区 */}
-      <div style={{ padding: 'clamp(36px, 6vw, 64px) clamp(20px, 4vw, 32px) clamp(24px, 4vw, 40px)', textAlign: 'center', maxWidth: '640px', margin: '0 auto' }}>
-        <h1 style={{ fontSize: 'clamp(24px, 4vw, 34px)', fontWeight: 700, lineHeight: 1.15, letterSpacing: '-0.03em', color: '#1D1D1F', margin: '0 0 12px' }}>
-          把判决书变成<br />专业上诉状
-        </h1>
-        <p style={{ fontSize: 'clamp(14px, 2.2vw, 17px)', lineHeight: 1.5, color: '#6E6E73', margin: 0 }}>
-          上传一审判决书，AI 自动识别，生成规范的民事上诉状。
-        </p>
-      </div>
-
-      {/* 上传区 */}
-      <div style={{ padding: '0 clamp(16px, 3vw, 32px) clamp(40px, 6vw, 64px)', maxWidth: 'clamp(400px, 80vw, 560px)', margin: '0 auto' }}>
-        {/* 错误提示 */}
-        <AnimatePresence>
-          {errorMsg && (
-            <motion.div
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0, height: 'auto' }}
-              exit={{ opacity: 0, height: 0, marginBottom: 0 }}
-              style={{
-                margin: '0 0 16px',
-                padding: '12px 16px',
-                borderRadius: 12,
-                background: '#FEF0EF',
-                border: '1px solid #F5C6C5',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                overflow: 'hidden'
-              }}
-            >
-              <span style={{ fontSize: 14, color: '#D93025', fontWeight: 500 }}>{errorMsg}</span>
-              <button onClick={() => setErrorMsg('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, color: '#D93025', padding: '0 4px', lineHeight: 1 }}>×</button>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <div
-          onDrop={onDrop}
-          onDragOver={onDragOver}
-          onDragLeave={onDragLeave}
-          style={{
-            border: isDragActive ? '2px solid #0071E3' : '2px dashed #E0E0E0',
-            borderRadius: '16px',
-            padding: 'clamp(24px, 4vw, 40px) clamp(16px, 3vw, 24px)',
-            transition: 'all 0.2s',
-            background: isDragActive ? 'rgba(0,113,227,0.04)' : '#F8F9FA',
-            textAlign: 'center',
-          }}
-        >
-          <p style={{ fontSize: 'clamp(14px, 2vw, 16px)', fontWeight: 600, color: '#1D1D1F', margin: '0 0 6px' }}>
-            {isDragActive ? '松开上传' : '点击或拖拽上诉书'}
+      {/* Hero */}
+      <main style={{ maxWidth: 980, margin: '0 auto', padding: '80px 24px 0' }}>
+        <div style={{ textAlign: 'center', maxWidth: 640, margin: '0 auto' }}>
+          <h1 style={{ fontSize: 'clamp(32px, 5vw, 56px)', fontWeight: 700, lineHeight: 1.08, letterSpacing: '-0.04em', color: '#1D1D1F', margin: '0 0 16px' }}>
+            Upload your judgment document
+          </h1>
+          <p style={{ fontSize: 'clamp(16px, 2vw, 20px)', lineHeight: 1.5, color: '#6E6E73', margin: 0, fontWeight: 400 }}>
+            AI automatically extracts case details and generates a formatted civil appeal petition.
           </p>
-          <p style={{ fontSize: 'clamp(12px, 1.8vw, 14px)', color: '#86868B', margin: '0 0 clamp(16px, 2vw, 24px)' }}>支持 PDF、PNG、JPG，最大 50MB</p>
-          <label htmlFor="file-upload" style={{ display: 'inline-block', background: '#0071E3', color: '#fff', border: 'none', borderRadius: '980px', padding: 'clamp(10px, 1.5vw, 14px) clamp(20px, 3vw, 28px)', fontSize: 'clamp(14px, 2vw, 16px)', fontWeight: 500, cursor: 'pointer' }}>
-            选择文件
-          </label>
-          <input id="file-upload" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={onFileChange} style={{ display: 'none' }} />
         </div>
-      </div>
 
-      {/* 流程说明 */}
-      <div style={{ padding: '0 clamp(16px, 3vw, 32px) clamp(60px, 8vw, 96px)', maxWidth: 'clamp(400px, 90vw, 560px)', margin: '0 auto' }}>
-        <p style={{ fontSize: 'clamp(12px, 1.8vw, 14px)', fontWeight: 600, color: '#0071E3', textAlign: 'center', marginBottom: '20px' }}>处理流程</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(160px, 100%), 1fr))', gap: 'clamp(12px, 2vw, 20px)' }}>
-          {[
-            { step: '01', title: '文件上传', desc: '支持扫描件' },
-            { step: '02', title: 'AI 法律分析', desc: '提取案件要素' },
-            { step: '03', title: '生成上诉状', desc: '规范的文书格式' },
-            { step: '04', title: '导出与编辑', desc: '支持编辑导出' },
-          ].map((f, i) => (
-            <div key={i} style={{ background: '#F8F9FA', borderRadius: '12px', padding: 'clamp(12px, 2vw, 18px)' }}>
-              <div style={{ fontSize: 'clamp(10px, 1.5vw, 12px)', fontWeight: 600, color: '#0071E3', marginBottom: '6px' }}>{f.step}</div>
-              <div style={{ fontSize: 'clamp(13px, 2vw, 15px)', fontWeight: 600, color: '#1D1D1F', marginBottom: '4px' }}>{f.title}</div>
-              <div style={{ fontSize: 'clamp(11px, 1.6vw, 13px)', color: '#86868B', lineHeight: 1.5 }}>{f.desc}</div>
-            </div>
-          ))}
+        {/* Upload Area */}
+        <div style={{ maxWidth: 520, margin: '48px auto 0', padding: '0 16px' }}>
+          <AnimatePresence>
+            {errorMsg && (
+              <motion.div
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0, height: 'auto' }}
+                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                style={{ marginBottom: 12, padding: '12px 16px', borderRadius: 12, background: '#FEF0EF', border: '1px solid #F5C6C5', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}
+              >
+                <span style={{ fontSize: 13, color: '#D93025', fontWeight: 500, flex: 1 }}>{errorMsg}</span>
+                <button onClick={() => setErrorMsg('')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 16, color: '#D93025', padding: '0 4px', lineHeight: 1 }}>x</button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div
+            onDrop={onDrop}
+            onDragOver={onDragOver}
+            onDragLeave={onDragLeave}
+            style={{
+              border: isDragActive ? '2px solid #0071E3' : '2px dashed #E0E0E0',
+              borderRadius: 20,
+              padding: uploading ? '40px 24px' : '56px 24px',
+              transition: 'all 0.25s ease',
+              background: uploading ? '#FFFFFF' : isDragActive ? 'rgba(0,113,227,0.03)' : '#F8F9FA',
+              textAlign: 'center',
+            }}
+          >
+            {uploading ? (
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#1D1D1F', marginBottom: 16 }}>Uploading document</div>
+                <div style={{ width: 240, height: 4, background: '#F0F0F0', borderRadius: 2, overflow: 'hidden', margin: '0 auto 12px' }}>
+                  <motion.div style={{ height: '100%', background: '#0071E3', borderRadius: 2 }} animate={{ width: `${uploadPct}%` }} transition={{ duration: 0.15 }} />
+                </div>
+                <p style={{ fontSize: 24, fontWeight: 700, color: '#0071E3', margin: 0, letterSpacing: '-0.02em' }}>{uploadPct}%</p>
+              </div>
+            ) : (
+              <div>
+                <p style={{ fontSize: 15, fontWeight: 500, color: '#1D1D1F', margin: '0 0 6px' }}>{isDragActive ? 'Drop your file' : 'Drag and drop your document'}</p>
+                <p style={{ fontSize: 13, color: '#86868B', margin: '0 0 24px' }}>PDF, PNG, JPG up to 50MB</p>
+                <label htmlFor="file-upload" style={{ display: 'inline-block', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, padding: '13px 28px', fontSize: 15, fontWeight: 500, cursor: 'pointer', letterSpacing: '-0.01em', transition: 'background 0.2s' }}>
+                  Select File
+                </label>
+                <input id="file-upload" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={onFileChange} style={{ display: 'none' }} />
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+
+        {/* Process steps */}
+        <div style={{ maxWidth: 560, margin: '64px auto 0', padding: '0 16px 100px' }}>
+          <p style={{ fontSize: 12, fontWeight: 600, color: '#0071E3', textAlign: 'center', marginBottom: 28, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Process</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+            {[
+              { step: '01', title: 'OCR', desc: 'Recognize scanned documents' },
+              { step: '02', title: 'AI Analysis', desc: 'Extract case details' },
+              { step: '03', title: 'Appeal Petition', desc: 'Generate formatted document' },
+            ].map((f) => (
+              <div key={f.step} style={{ background: '#F5F5F7', borderRadius: 16, padding: '24px 20px', textAlign: 'center' }}>
+                <div style={{ fontSize: 10, fontWeight: 600, color: '#86868B', marginBottom: 8, letterSpacing: '0.08em', textTransform: 'uppercase' }}>{f.step}</div>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#1D1D1F', marginBottom: 6, letterSpacing: '-0.02em' }}>{f.title}</div>
+                <div style={{ fontSize: 12, color: '#86868B', lineHeight: 1.5 }}>{f.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
     </div>
   )
 }

@@ -13,9 +13,9 @@ interface Step {
 }
 
 const STEPS = [
-  { id: 'upload', title: '上传' },
-  { id: 'ocr', title: 'OCR识别' },
-  { id: 'analyze', title: 'AI分析' },
+  { id: 'upload', title: 'Upload' },
+  { id: 'ocr', title: 'OCR' },
+  { id: 'analyze', title: 'AI Analysis' },
 ]
 
 function sleep(ms: number) { return new Promise<void>(r => setTimeout(r, ms)) }
@@ -29,7 +29,7 @@ function FlowContent() {
   const [rateLimit, setRateLimit] = useState(false)
   const [retryAfter, setRetryAfter] = useState(0)
   const [ocrText, setOcrText] = useState('')
-  const [ocrExpanded, setOcrExpanded] = useState(true)
+  const [ocrExpanded, setOcrExpanded] = useState(false)
   const [fileName, setFileName] = useState('')
 
   const processRef = useRef<boolean>(false)
@@ -43,10 +43,10 @@ function FlowContent() {
 
   async function callApi(url: string, body: any) {
     for (let attempt = 0; attempt <= 2; attempt++) {
-      if (abortRef.current?.signal.aborted) throw new Error('请求已取消')
+      if (abortRef.current?.signal.aborted) throw new Error('Cancelled')
       const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: abortRef.current?.signal })
       if (res.status === 429) {
-        if (attempt === 2) throw new Error('API 频率超限，请稍后重试')
+        if (attempt === 2) throw new Error('Rate limited')
         const wait = (attempt + 1) * 8000
         setRateLimit(true); setRetryAfter(Math.ceil(wait / 1000))
         if (countdownRef.current) clearInterval(countdownRef.current)
@@ -54,51 +54,50 @@ function FlowContent() {
           setRetryAfter(prev => { if (prev <= 1) { clearInterval(countdownRef.current!); setRateLimit(false); return 0 }; return prev - 1 })
         }, 1000)
         await sleep(wait)
-        if (abortRef.current?.signal.aborted) throw new Error('请求已取消')
+        if (abortRef.current?.signal.aborted) throw new Error('Cancelled')
         continue
       }
-      if (!res.ok) throw new Error(`请求失败: ${res.status}`)
+      if (!res.ok) throw new Error(`Request failed: ${res.status}`)
       return res.json()
     }
-    throw new Error('请求失败')
+    throw new Error('Request failed')
   }
 
   async function processFile() {
     if (processRef.current) return
     processRef.current = true
 
-    setStepStatus(0, 'done', 100, '完成')
+    setStepStatus(0, 'done', 100, 'Complete')
 
-    // OCR
-    setStepStatus(1, 'active', 10, '正在识别文档...')
     let text = ''
+    // OCR
+    setStepStatus(1, 'active', 10, 'Recognizing...')
     try {
       const ocrRes = await callApi('/api/ocr', { file_id: fileIdRef.current })
-      if (!ocrRes.success) throw new Error(ocrRes.error || 'OCR 识别失败')
+      if (!ocrRes.success) throw new Error(ocrRes.error || 'OCR failed')
       text = ocrRes.text || ''
       setOcrText(text)
       localStorage.setItem('lw_ocr_text', text)
-      setStepStatus(1, 'done', 100, `识别完成 ${text.length} 字`)
+      setStepStatus(1, 'done', 100, `${text.length.toLocaleString()} characters extracted`)
     } catch (err: any) {
-      if (err.message === '请求已取消') return
-      setStepStatus(1, 'error', 0, err.message); setError(`OCR 识别失败: ${err.message}`); return
+      if (err.message === 'Cancelled') return
+      setStepStatus(1, 'error', 0, err.message); setError(`OCR failed: ${err.message}`); return
     }
 
-    // AI 分析（静默运行，不展示 UI）
-    setStepStatus(2, 'active', 10, '正在分析案件...')
+    // AI Analysis
+    setStepStatus(2, 'active', 10, 'Analyzing...')
     try {
       const analyzeRes = await callApi('/api/analyze', { text })
       if (analyzeRes.success && analyzeRes.info) {
         localStorage.setItem('lw_analyze_info', JSON.stringify(analyzeRes.info))
-        setStepStatus(2, 'done', 100, '完成')
+        setStepStatus(2, 'done', 100, 'Complete')
       } else {
-        setStepStatus(2, 'done', 100, '分析完成（可手动填写）')
+        setStepStatus(2, 'done', 100, 'Complete (manual fill available)')
       }
-    } catch (err: any) {
-      setStepStatus(2, 'done', 100, '分析完成（可手动填写）')
+    } catch {
+      setStepStatus(2, 'done', 100, 'Complete (manual fill available)')
     }
 
-    // 1秒后自动跳转到确认页
     setTimeout(() => router.push('/confirm'), 1000)
   }
 
@@ -113,93 +112,76 @@ function FlowContent() {
   }, [])
 
   return (
-    <div style={{ minHeight: '100vh', background: '#F8F9FA', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-      {/* 导航栏 */}
-      <div style={{ padding: '12px 16px', background: '#FFF', borderBottom: '1px solid #E8EAED', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); abortRef.current?.abort(); router.push('/') }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', fontWeight: 600, color: '#1D1D1F', padding: '8px 0' }}>← 返回</button>
-        <span style={{ fontSize: '13px', color: '#6E6E73', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>{fileName}</span>
-        <div style={{ width: 50 }} />
-      </div>
-
-      {/* 顶部进度条 */}
-      <div style={{ background: '#FFF', borderBottom: '1px solid #F0F0F0', padding: '12px 16px' }}>
-        <div style={{ display: 'flex', gap: 0, justifyContent: 'center' }}>
-          {steps.map((step, i) => (
-            <div key={step.id} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', position: 'relative' }}>
-              {i > 0 && <div style={{ position: 'absolute', top: 12, left: 0, right: '50%', height: 2, background: step.status === 'done' ? '#0071E3' : '#E8E8ED' }} />}
-              {i < steps.length - 1 && <div style={{ position: 'absolute', top: 12, left: '50%', right: 0, height: 2, background: steps[i + 1]?.status === 'done' ? '#0071E3' : '#E8E8ED' }} />}
-              <div style={{ width: 24, height: 24, borderRadius: '50%', zIndex: 1, background: step.status === 'done' ? '#0071E3' : step.status === 'active' ? '#E8F0FE' : step.status === 'error' ? '#FCE8E6' : '#F1F3F4', display: 'flex', alignItems: 'center', justifyContent: 'center', border: step.status === 'active' ? '2px solid #0071E3' : 'none', transition: 'all 0.3s' }}>
-                {step.status === 'active' && <div style={{ width: 10, height: 10, borderRadius: '50%', border: '2px solid #0071E3', borderTopColor: 'transparent', animation: 'spin 1s linear infinite' }} />}
-                {step.status === 'done' && <span style={{ color: '#FFF', fontSize: 11, fontWeight: 600 }}>✓</span>}
-                {step.status === 'error' && <span style={{ color: '#D93025', fontSize: 11, fontWeight: 600 }}>!</span>}
-                {step.status === 'pending' && <span style={{ color: '#86868B', fontSize: 11, fontWeight: 500 }}>{i + 1}</span>}
-              </div>
-              <span style={{ fontSize: 10, fontWeight: 500, color: step.status === 'active' ? '#0071E3' : step.status === 'error' ? '#D93025' : '#86868B', marginTop: 4 }}>{step.title}</span>
-            </div>
-          ))}
+    <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
+      {/* Navigation */}
+      <nav style={{ backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', background: 'rgba(255,255,255,0.85)', borderBottom: '1px solid rgba(0,0,0,0.08)' }}>
+        <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 52 }}>
+          <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); abortRef.current?.abort(); router.push('/') }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0071E3', fontWeight: 500 }}>Back</button>
+          <span style={{ fontSize: 13, color: '#86868B', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{fileName}</span>
+          <div style={{ width: 40 }} />
         </div>
-      </div>
+      </nav>
 
-      {/* 页面标题 */}
-      <div style={{ textAlign: 'center', padding: '24px 16px 16px' }}>
-        <h2 style={{ fontSize: '18px', fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px' }}>{error ? '处理出错' : '正在处理'}</h2>
-        <p style={{ fontSize: '13px', color: '#86868B', margin: 0 }}>{error ? '请根据提示操作' : ocrText ? '即将跳转到确认页...' : '请稍候'}</p>
-      </div>
+      {/* Main Content */}
+      <main style={{ maxWidth: 680, margin: '0 auto', padding: '48px 24px 80px' }}>
+        <h1 style={{ fontSize: 28, fontWeight: 700, color: '#1D1D1F', margin: '0 0 4px', letterSpacing: '-0.03em' }}>Processing</h1>
+        <p style={{ fontSize: 15, color: '#86868B', margin: '0 0 40px' }}>{error ? error : 'Please wait while we process your document.'}</p>
 
-      {/* 主内容 */}
-      <div style={{ padding: '0 16px 60px', maxWidth: '600px', margin: '0 auto' }}>
-        {/* 步骤列表 */}
-        <div style={{ background: '#FFF', borderRadius: '14px', padding: '16px', marginBottom: '16px', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
+        {/* Steps */}
+        <div style={{ background: '#F8F9FA', borderRadius: 16, padding: 24, marginBottom: 24 }}>
           {steps.map((step, i) => (
-            <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: 14, paddingBottom: i < steps.length - 1 ? 14 : 0, opacity: step.status === 'pending' ? 0.5 : 1 }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: step.status === 'done' ? '#0071E3' : step.status === 'active' ? '#E8F0FE' : '#F1F3F4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                {step.status === 'active' && <div style={{ width: 12, height: 12, borderRadius: '50%', border: '2px solid #0071E3', borderTopColor: 'transparent', animation: 'spin 1s linear infinite' }} />}
-                {step.status === 'done' && <span style={{ color: '#FFF', fontSize: 12, fontWeight: 600 }}>✓</span>}
-                {step.status === 'error' && <span style={{ color: '#D93025', fontSize: 12, fontWeight: 600 }}>!</span>}
-                {step.status === 'pending' && <span style={{ color: '#86868B', fontSize: 12 }}>{i + 1}</span>}
+            <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: 16, paddingBottom: i < steps.length - 1 ? 20 : 0, marginBottom: i < steps.length - 1 ? 20 : 0, borderBottom: i < steps.length - 1 ? '1px solid #E8E8ED' : 'none' }}>
+              <div style={{ width: 32, height: 32, borderRadius: '50%', background: step.status === 'done' ? '#0071E3' : step.status === 'active' ? '#E8F0FE' : step.status === 'error' ? '#FCE8E6' : '#F1F3F4', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                {step.status === 'done' && <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M13.5 4.5L6 12L2.5 8.5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                {step.status === 'active' && <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #0071E3', borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />}
+                {step.status === 'error' && <span style={{ color: '#D93025', fontSize: 14, fontWeight: 600 }}>!</span>}
+                {step.status === 'pending' && <span style={{ color: '#86868B', fontSize: 12, fontWeight: 500 }}>{i + 1}</span>}
               </div>
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '14px', fontWeight: 600, color: step.status === 'error' ? '#D93025' : '#1D1D1F' }}>{step.title}</div>
-                <div style={{ fontSize: '12px', color: '#86868B', marginTop: 2 }}>{step.message}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: step.status === 'error' ? '#D93025' : '#1D1D1F', marginBottom: 2 }}>{step.title}</div>
+                <div style={{ fontSize: 13, color: '#86868B', lineHeight: 1.4 }}>{step.message}</div>
                 {step.status === 'active' && step.progress > 0 && (
-                  <div style={{ marginTop: 6, height: 3, background: '#E8E8ED', borderRadius: 2, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${step.progress}%`, background: '#0071E3', transition: 'width 0.4s' }} />
+                  <div style={{ marginTop: 8, height: 3, background: '#E8E8ED', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${step.progress}%`, background: '#0071E3', transition: 'width 0.4s ease' }} />
                   </div>
                 )}
               </div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: step.status === 'done' ? '#0071E3' : step.status === 'error' ? '#D93025' : '#86868B', minWidth: 40, textAlign: 'right' }}>
+                {step.status === 'done' ? 'Done' : step.status === 'error' ? 'Error' : step.status === 'active' ? '...' : 'Pending'}
+              </div>
             </div>
           ))}
         </div>
 
-        {/* OCR 结果 */}
-        {ocrText && !error && (
-          <div style={{ background: '#FFF', borderRadius: '14px', overflow: 'hidden', boxShadow: '0 1px 6px rgba(0,0,0,0.05)' }}>
-            <div style={{ padding: '14px 16px', borderBottom: '1px solid #F5F5F5', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        {/* OCR Preview */}
+        {ocrText && (
+          <div style={{ background: '#F8F9FA', borderRadius: 16, overflow: 'hidden' }}>
+            <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' }} onClick={() => setOcrExpanded(v => !v)}>
               <div>
-                <h3 style={{ fontSize: '13px', fontWeight: 600, color: '#86868B', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 2px' }}>OCR 识别结果</h3>
-                <p style={{ fontSize: '11px', color: '#86868B', margin: 0 }}>{ocrText.length} 字</p>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 2 }}>OCR Result</div>
+                <div style={{ fontSize: 13, color: '#86868B' }}>{ocrText.length.toLocaleString()} characters</div>
               </div>
-              <button onClick={() => setOcrExpanded(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '12px', color: '#0071E3', fontWeight: 500, padding: '4px 8px' }}>{ocrExpanded ? '收起' : '展开'}</button>
+              <div style={{ fontSize: 12, color: '#0071E3', fontWeight: 500 }}>{ocrExpanded ? 'Collapse' : 'Expand'}</div>
             </div>
             {ocrExpanded && (
-              <div style={{ padding: '12px 14px', maxHeight: 240, overflow: 'auto', background: '#FAFAFA' }}>
-                <pre style={{ margin: 0, fontSize: '12px', lineHeight: 1.8, color: '#3D3D3F', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit' }}>{ocrText}</pre>
+              <div style={{ padding: '0 20px 16px', maxHeight: 280, overflow: 'auto', background: '#FFFFFF', borderRadius: '0 0 16px 16px' }}>
+                <pre style={{ margin: 0, fontSize: 12, lineHeight: 1.8, color: '#3D3D3F', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit' }}>{ocrText}</pre>
               </div>
             )}
           </div>
         )}
 
-        {/* 错误提示 */}
+        {/* Error */}
         {(error || rateLimit) && (
-          <div style={{ marginTop: 16, padding: 16, background: '#FEF0EF', borderRadius: 12, border: '1px solid #F5C6C5' }}>
-            <div style={{ fontSize: '13px', color: '#D93025', marginBottom: 12 }}>{rateLimit ? `API 频率限制，${retryAfter} 秒后自动重试...` : error}</div>
+          <div style={{ marginTop: 24, padding: '16px 20px', background: '#FEF0EF', borderRadius: 14, border: '1px solid #F5C6C5' }}>
+            <div style={{ fontSize: 13, color: '#D93025', marginBottom: 16 }}>{rateLimit ? `Rate limited. Retry in ${retryAfter}s...` : error}</div>
             <div style={{ display: 'flex', gap: 10 }}>
-              {!rateLimit && <button onClick={() => { processRef.current = false; processFile() }} style={{ flex: 1, padding: '10px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: '14px', fontWeight: 500, minHeight: 44 }}>重试</button>}
-              <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); router.push('/') }} style={{ flex: 1, padding: '10px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 8, cursor: 'pointer', fontSize: '14px', fontWeight: 500, minHeight: 44 }}>重新上传</button>
+              {!rateLimit && <button onClick={() => { processRef.current = false; processFile() }} style={{ flex: 1, padding: '10px 16px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>Retry</button>}
+              <button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); router.push('/') }} style={{ flex: 1, padding: '10px 16px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>Upload New</button>
             </div>
           </div>
         )}
-      </div>
+      </main>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
