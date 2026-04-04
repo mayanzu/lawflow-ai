@@ -1,8 +1,11 @@
 {
   "/page": "app/page.js",
   "/confirm/page": "app/confirm/page.js",
-  "/history/page": "app/history/page.js",
-  "/api/generate-appeal-stream/route": "app/api/generate-appeal-stream/route.js",
   "/result/page": "app/result/page.js",
+  "/history/page": "app/history/page.js",
+  "/api/upload/route": "app/api/upload/route.js",
+  "/api/ocr/route": "app/api/ocr/route.js",
+  "/api/analyze/route": "app/api/analyze/route.js",
+  "/api/generate-appeal-stream/route": "app/api/generate-appeal-stream/route.js",
   "/flow/page": "app/flow/page.js"
 }
