@@ -20,7 +20,7 @@ else:
 
 # 火山引擎方舟 (备用，无频率限制)
 def _load_env():
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.env")
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "/opt/lawflow/.env")
     try:
         with open(env_path) as f:
             for line in f:
@@ -38,7 +38,7 @@ AI_PROVIDER = 'volcengine'  # openrouter 或 volcengine
 
 # ===== 腾讯云 OCR 配置 =====
 def _load_tencent_creds():
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../.env")
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "/opt/lawflow/.env")
     try:
         with open(env_path) as f:
             for line in f:
@@ -284,33 +284,7 @@ def _ocr_pdf(path):
     total_pages = min(len(doc), 30)
     MATRIX = fitz.Matrix(1.2, 1.2)
 
-    # Step 1: 腾讯云 OCR 优先（先试前5页，节省额度）
-    if USE_TENCENT_OCR:
-        all_text = []
-        max_tencent_pages = min(total_pages, 5)
-        all_tencent_ok = True
-        try:
-            for pg in range(max_tencent_pages):
-                pix = doc[pg].get_pixmap(matrix=MATRIX)
-                tmp = tempfile.mktemp(suffix=".png")
-                pix.save(tmp)
-                del pix
-                with open(tmp, 'rb') as f:
-                    img_b64 = base64.b64encode(f.read()).decode('utf-8')
-                tencent_result = _tencent_ocr_base64(img_b64)
-                if tencent_result and len(tencent_result) > 50:
-                    all_text.append(tencent_result)
-                    print(f"  P{pg+1}: Tencent OCR {len(tencent_result)} chars", flush=True)
-                else:
-                    all_tencent_ok = False
-                os.remove(tmp)
-            if all_tencent_ok and all_text:
-                doc.close()
-                return "\n".join(all_text)
-        except Exception as e:
-            print(f"  Tencent OCR failed: {e}", flush=True)
-
-    # Step 2: pdfplumber 提取文字（纯文本PDF兜底）
+    # Step 1: pdfplumber 先试（纯文本PDF秒级返回）
     try:
         import pdfplumber
         pdf_text = []
@@ -325,11 +299,9 @@ def _ocr_pdf(path):
     except Exception as e:
         print(f"  pdfplumber failed: {e}", flush=True)
 
-    # Step 3: 本地 RapidOCR 逐页兜底
+    # Step 2: 扫描件 -> 每页优先腾讯云OCR，失败 fallback RapidOCR
     ocr_local = _get_ocr_img()
-    if not ocr_local:
-        doc.close()
-        return ""
+    tencent_failed = False
     
     try:
         import fitz
@@ -381,7 +353,6 @@ def _ocr_pdf(path):
                     os.remove(tmp)
                 gc.collect()
 
-        doc.close()
         gc.collect()
 
         text = "\n".join(all_text)
