@@ -512,6 +512,8 @@ class Handler(ThreadedHandler):
             elif p == "/generate-appeal-stream":
                 self._generate_stream(body)
                 return
+            elif p == "/validate-appeal":
+                res = self._validate_appeal(body.get("appeal_text", ""), body.get("info", {}))
             elif p == "/upload":
                 res = self._upload_json(body)
             else:
@@ -919,6 +921,109 @@ class Handler(ThreadedHandler):
             pass  # AI 通常已经输出完整
         
         return text
+
+
+    def _validate_appeal(self, appeal_text, info):
+        import re
+        results = []
+        info = info or {}
+
+        def add(check, status, msg):
+            results.append({"check": check, "status": status, "msg": msg})
+
+        # 1. 标题
+        if re.search(r"^民事上诉状", appeal_text.strip()):
+            add("标题", "ok", "包含标题民事上诉状")
+        else:
+            add("标题", "error", "缺少标题民事上诉状")
+
+        # 2. 上诉人
+        appellant_name = info.get("原告") or info.get("上诉人") or ""
+        if re.search(r"上诉人[：:]\s*\S", appeal_text):
+            add("上诉人", "ok", "包含上诉人信息")
+        else:
+            add("上诉人", "error", "缺少上诉人信息（应为：" + appellant_name + "）")
+
+        # 3. 被上诉人
+        appellee_name = info.get("被告") or info.get("被上诉人") or ""
+        if re.search(r"被上诉人[：:]\s*\S", appeal_text):
+            add("被上诉人", "ok", "包含被上诉人信息")
+        else:
+            add("被上诉人", "warning", "缺少被上诉人信息（应为：" + appellee_name + "）")
+
+        # 4. 上诉请求
+        numbered = re.findall(r"^\s*\d+[.、)）](.+?)(?=^\s*\d|\Z)", appeal_text, re.MULTILINE)
+        numbered = [r.strip() for r in numbered if len(r.strip()) > 5]
+        vague = any(any(v in r for v in ["请求依法", "请求法院", "请求改判"]) for r in numbered)
+        if len(numbered) >= 2:
+            if vague:
+                add("上诉请求", "warning", "找到" + str(len(numbered)) + "项上诉请求，但包含不具体表述，建议改为具体诉求")
+            else:
+                add("上诉请求", "ok", "包含" + str(len(numbered)) + "项上诉请求")
+        elif len(numbered) == 1:
+            add("上诉请求", "warning", "上诉请求仅有1项，建议至少列明2项")
+        else:
+            add("上诉请求", "error", "未找到上诉请求，请明确列出上诉诉求")
+
+        # 5. 法律依据
+        reasons = re.search(r"事实与理由[：:](.+?)(?=\n\n|\n此致|$)", appeal_text, re.DOTALL)
+        reasons_text = reasons.group(1) if reasons else appeal_text
+        refs = re.findall(r"《([^《]+)》第?(\d+)[条节款项]", reasons_text)
+        refs_str = "、".join(["《" + r[0] + "》第" + r[1] + "条" for r in refs[:5]])
+        if refs:
+            add("法律依据", "ok", "引用了" + str(len(refs)) + "处法律依据：" + refs_str)
+        else:
+            add("法律依据", "error", "事实与理由中未找到法律条文引用，请补充法律依据")
+
+        # 6. 此致敬礼
+        if "此致" in appeal_text:
+            add("此致敬礼", "ok", "包含此致敬礼格式")
+        else:
+            add("此致敬礼", "error", "缺少此致敬礼结尾格式")
+
+        # 7. 上诉法院
+        expected_court = info.get("上诉法院") or ""
+        if expected_court:
+            if expected_court in appeal_text:
+                add("上诉法院", "ok", "上诉法院为：" + expected_court)
+            else:
+                add("上诉法院", "error", "上诉法院应为：" + expected_court + "，请核对")
+
+        # 8. 署名
+        has_sig = bool(re.search(r"上诉人[：:]\s*\S", appeal_text))
+        has_agent = "委托代理人" in appeal_text and "律师" in appeal_text
+        if has_sig and has_agent:
+            add("署名", "ok", "包含上诉人署名及委托代理人")
+        elif has_sig:
+            add("署名", "warning", "包含上诉人署名，但缺少委托代理人")
+        else:
+            add("署名", "error", "缺少上诉人署名和委托代理人")
+
+        # 9. 占位符检查
+        placeholders = re.findall(r"[Xx]{2,}|\.{3}|\[.*?\]", appeal_text)
+        bad = [p for p in placeholders if p not in ["...", "——", "…"]]
+        if bad:
+            add("占位符", "error", "发现未填充占位符：" + ", ".join(set(bad[:5])))
+        else:
+            add("占位符", "ok", "无占位符")
+
+        # 10. 完整性
+        cnt = len(appeal_text.replace(" ", "").replace("\n", ""))
+        if cnt < 500:
+            add("完整性", "error", "诉状仅" + str(cnt) + "字，内容过少，可能生成不完整")
+        elif cnt < 800:
+            add("完整性", "warning", "诉状" + str(cnt) + "字，建议丰富事实与理由部分")
+        else:
+            add("完整性", "ok", "诉状" + str(cnt) + "字，内容充实")
+
+        ok_c = sum(1 for r in results if r["status"] == "ok")
+        warn_c = sum(1 for r in results if r["status"] == "warning")
+        err_c = sum(1 for r in results if r["status"] == "error")
+        overall = "ok" if err_c == 0 and warn_c <= 1 else ("warning" if err_c == 0 else "error")
+        return {"success": True, "results": results,
+                "ok": ok_c, "warnings": warn_c, "errors": err_c,
+                "overall": overall}
+
 
 if __name__ == "__main__":
     model_name = VOLCENGINE_MODEL if AI_PROVIDER == 'volcengine' else OPENROUTER_MODEL

@@ -11,6 +11,9 @@ export default function ResultPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [streamDone, setStreamDone] = useState(false)
   const [isExportMenu, setIsExportMenu] = useState(false)
+  const [isValidating, setIsValidating] = useState(false)
+  const [validateResults, setValidateResults] = useState<any>(null)
+  const [showValidate, setShowValidate] = useState(false)
   const [legalBasis, setLegalBasis] = useState<string[]>([])
   const [showBasis, setShowBasis] = useState(false)
   const streamEndRef = useRef<HTMLDivElement>(null)
@@ -159,6 +162,27 @@ export default function ResultPage() {
     }
   }
 
+  async function handleValidate() {
+    const text = localStorage.getItem('lw_appeal_text') || editedText
+    const infoRaw = localStorage.getItem('lw_analyze_info') || '{}'
+    let info: any = {}
+    try { info = JSON.parse(infoRaw) } catch {}
+    setIsValidating(true)
+    setShowValidate(true)
+    try {
+      const res = await fetch('http://163.7.1.176:3457/validate-appeal', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ appeal_text: text, info })
+      })
+      const data = await res.json()
+      setValidateResults(data)
+    } catch (e: any) {
+      setValidateResults({ success: false, error: e.message })
+    }
+    setIsValidating(false)
+  }
+
   function handleRegenerate() {
     if (!confirm('重新生成将清空当前内容，确定继续？')) return
     Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k))
@@ -206,6 +230,7 @@ export default function ResultPage() {
               <p style={{ fontSize: 12, color: '#86868B', margin: 0 }}>{editedText.length.toLocaleString()} 字</p>
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={handleValidate} style={{ padding: '10px 20px', background: validateResults?.overall === 'error' ? '#FF3B30' : validateResults?.overall === 'warning' ? '#FF9500' : '#34C759', color: '#FFF', border: 'none', borderRadius: 980, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>校验</button>
               <button onClick={() => setIsEditing(true)} style={{ padding: '10px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>编辑</button>
               <button onClick={handleRegenerate} style={{ padding: '10px 20px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 980, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>新建任务</button>
             </div>
@@ -235,6 +260,47 @@ export default function ResultPage() {
           <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
             <button onClick={() => { setIsEditing(false); localStorage.setItem('lw_appeal_text', editedText) }} style={{ flex: 2, padding: '14px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>保存</button>
             <button onClick={() => setIsEditing(false)} style={{ flex: 1, padding: '14px 20px', background: '#FFF', color: '#1D1D1F', border: '1px solid #E0E0E0', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500 }}>取消</button>
+          </div>
+        )}
+
+        {/* 校验结果 */}
+        {showValidate && (
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <h3 style={{ fontSize: 14, fontWeight: 600, color: '#1D1D1F', margin: 0 }}>诉状校验结果</h3>
+              <button onClick={() => setShowValidate(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#86868B' }}>关闭</button>
+            </div>
+            {isValidating ? (
+              <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                <div style={{ width: 24, height: 24, borderRadius: '50%', border: '2px solid #F0F0F0', borderTopColor: '#0071E3', animation: 'spin 0.8s linear infinite', margin: '0 auto 12px' }} />
+                <p style={{ fontSize: 13, color: '#86868B', margin: 0 }}>校验中...</p>
+              </div>
+            ) : validateResults?.success === false ? (
+              <div style={{ padding: '16px', background: '#FEF0EF', borderRadius: 12, color: '#D93025', fontSize: 13 }}>{validateResults.error || "校验失败"}</div>
+            ) : validateResults?.results ? (
+              <div>
+                <div style={{ padding: '12px 16px', borderRadius: 12, marginBottom: 12, fontSize: 13, fontWeight: 600,
+                  background: validateResults.overall === 'ok' ? '#F0FAF0' : validateResults.overall === 'warning' ? '#FFF8F0' : '#FEF0EF',
+                  color: validateResults.overall === 'ok' ? '#2E7D32' : validateResults.overall === 'warning' ? '#E65100' : '#D93025'
+                }}>
+                  {validateResults.overall === 'ok' ? '校验通过' : validateResults.overall === 'warning' ? '存在警告' : '存在错误'} — 通过{validateResults.ok}/{validateResults.results.length}项，警告{validateResults.warnings}项，错误{validateResults.errors}项
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {validateResults.results.map((r: any, i: number) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', background: '#F8F9FA', borderRadius: 10 }}>
+                      <span style={{ width: 20, height: 20, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, marginTop: 1,
+                        background: r.status === 'ok' ? '#34C759' : r.status === 'warning' ? '#FF9500' : '#FF3B30',
+                        color: '#FFF'
+                      }}>{r.status === 'ok' ? '✓' : r.status === 'warning' ? '!': '✗'}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1D1D1F' }}>{r.check}</div>
+                        <div style={{ fontSize: 12, color: r.status === 'ok' ? '#86868B' : r.status === 'warning' ? '#E65100' : '#D93025', marginTop: 2, lineHeight: 1.5 }}>{r.msg}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
 
