@@ -1029,6 +1029,7 @@ class Handler(ThreadedHandler):
 
 
     def _validate_appeal(self, appeal_text, info):
+        """校验上诉状格式，依据民诉法第165条、最高法院诉讼文书样式"""
         import re
         results = []
         info = info or {}
@@ -1038,93 +1039,71 @@ class Handler(ThreadedHandler):
 
         # 1. 标题
         if re.search(r"^民事上诉状", appeal_text.strip()):
-            add("标题", "ok", "包含标题民事上诉状")
+            add("文书标题", "ok", "标题正确")
         else:
-            add("标题", "error", "缺少标题民事上诉状")
+            add("文书标题", "error", "应以民事上诉状为标题（最高法院文书样式）")
 
-        # 2. 上诉人
-        appellant_name = info.get("原告") or info.get("上诉人") or ""
-        if re.search(r"上诉人[：:]\s*\S", appeal_text):
-            add("上诉人", "ok", "包含上诉人信息")
+        # 2. 当事人信息 - 民诉法要求明确当事人
+        if re.search(r"上诉人.*[：:]", appeal_text):
+            add("上诉人信息", "ok", "已列明上诉人")
         else:
-            add("上诉人", "error", "缺少上诉人信息（应为：" + appellant_name + "）")
+            add("上诉人信息", "error", "缺少上诉人署名（民诉法要求写明当事人基本情况）")
 
-        # 3. 被上诉人
-        appellee_name = info.get("被告") or info.get("被上诉人") or ""
-        if re.search(r"被上诉人[：:]\s*\S", appeal_text):
-            add("被上诉人", "ok", "包含被上诉人信息")
+        if re.search(r"被上诉人.*[：:]", appeal_text):
+            add("被上诉人信息", "ok", "已列明被上诉人")
         else:
-            add("被上诉人", "warning", "缺少被上诉人信息（应为：" + appellee_name + "）")
+            add("被上诉人信息", "warning", "建议列明被上诉人基本信息")
 
-        # 4. 上诉请求
-        numbered = re.findall(r"^\s*\d+[.、)）](.+?)(?=^\s*\d|\Z)", appeal_text, re.MULTILINE)
-        numbered = [r.strip() for r in numbered if len(r.strip()) > 5]
-        vague = any(any(v in r for v in ["请求依法", "请求法院", "请求改判"]) for r in numbered)
-        if len(numbered) >= 2:
-            if vague:
-                add("上诉请求", "warning", "找到" + str(len(numbered)) + "项上诉请求，但包含不具体表述，建议改为具体诉求")
-            else:
-                add("上诉请求", "ok", "包含" + str(len(numbered)) + "项上诉请求")
-        elif len(numbered) == 1:
-            add("上诉请求", "warning", "上诉请求仅有1项，建议至少列明2项")
+        # 3. 上诉请求 - 民诉法第165条强制要求
+        has_req = bool(re.search(r"上诉请求.*?[：:]", appeal_text))
+        if has_req:
+            add("上诉请求", "ok", "包含上诉请求")
         else:
-            add("上诉请求", "error", "未找到上诉请求，请明确列出上诉诉求")
+            add("上诉请求", "error", "缺少上诉请求（民诉法第165条：上诉状应当写明上诉请求）")
 
-        # 5. 法律依据
-        reasons = re.search(r"事实与理由[：:](.+?)(?=\n\n|\n此致|$)", appeal_text, re.DOTALL)
-        reasons_text = reasons.group(1) if reasons else appeal_text
-        refs = re.findall(r"《([^《]+)》第?(\d+)[条节款项]", reasons_text)
-        refs_str = "、".join(["《" + r[0] + "》第" + r[1] + "条" for r in refs[:5]])
-        if refs:
-            add("法律依据", "ok", "引用了" + str(len(refs)) + "处法律依据：" + refs_str)
+        # 4. 事实与理由 - 同上
+        if "事实与理由" in appeal_text:
+            add("事实与理由", "ok", "包含事实与理由部分")
         else:
-            add("法律依据", "error", "事实与理由中未找到法律条文引用，请补充法律依据")
+            add("事实与理由", "error", "缺少事实与理由（民诉法第165条：上诉状应当写明上诉理由）")
 
-        # 6. 此致敬礼
+        # 5. 致送法院 - 文书样式要求写明二审法院
         if "此致" in appeal_text:
-            add("此致敬礼", "ok", "包含此致敬礼格式")
-        else:
-            add("此致敬礼", "error", "缺少此致敬礼结尾格式")
-
-        # 7. 上诉法院
-        expected_court = info.get("上诉法院") or ""
-        if expected_court:
-            if expected_court in appeal_text:
-                add("上诉法院", "ok", "上诉法院为：" + expected_court)
+            court_match = re.search(r"此致.*?\n\s*([^\n]+)", appeal_text)
+            if court_match and "法院" in court_match.group(1):
+                add("致送法院", "ok", "已写明致送的二审法院: " + court_match.group(1).strip())
             else:
-                add("上诉法院", "error", "上诉法院应为：" + expected_court + "，请核对")
-
-        # 8. 署名
-        has_sig = bool(re.search(r"上诉人[：:]\s*\S", appeal_text))
-        has_agent = "委托代理人" in appeal_text and "律师" in appeal_text
-        if has_sig and has_agent:
-            add("署名", "ok", "包含上诉人署名及委托代理人")
-        elif has_sig:
-            add("署名", "warning", "包含上诉人署名，但缺少委托代理人")
+                add("致送法院", "warning", "此致下方未找到法院名称")
         else:
-            add("署名", "error", "缺少上诉人署名和委托代理人")
+            add("致送法院", "error", "缺少此致及致送法院(上诉状尾部必须写明呈送的二审法院)")
 
-        # 9. 占位符检查
-        placeholders = re.findall(r"[Xx]{2,}|\.{3}|\[.*?\]", appeal_text)
-        bad = [p for p in placeholders if p not in ["...", "——", "…"]]
-        if bad:
-            add("占位符", "error", "发现未填充占位符：" + ", ".join(set(bad[:5])))
+        # 6. 上诉人署名及日期 - 文书效力要求
+        sig_match = re.search(r"上诉人[：:\s]*(.+?)\n", appeal_text)
+        has_date = bool(re.search(r"\d{4}年\d{1,2}月\d{1,2}日", appeal_text))
+        if sig_match:
+            if has_date:
+                add("署名与日期", "ok", "上诉人署名及日期齐全")
+            else:
+                add("署名与日期", "warning", "已有上诉人署名，建议补充日期")
         else:
-            add("占位符", "ok", "无占位符")
+            add("署名与日期", "error", "缺少上诉人署名（书面文件须有签字或盖章）")
 
-        # 10. 完整性
-        cnt = len(appeal_text.replace(" ", "").replace("\n", ""))
-        if cnt < 500:
-            add("完整性", "error", "诉状仅" + str(cnt) + "字，内容过少，可能生成不完整")
-        elif cnt < 800:
-            add("完整性", "warning", "诉状" + str(cnt) + "字，建议丰富事实与理由部分")
+        # 7. 委托代理人
+        if "委托代理人" in appeal_text and "律师" in appeal_text:
+            add("委托代理人", "ok", "包含委托代理人信息")
         else:
-            add("完整性", "ok", "诉状" + str(cnt) + "字，内容充实")
+            add("委托代理人", "info", "建议写明委托代理人（非强制）")
+
+        # 8. 副本说明
+        if "副本" in appeal_text:
+            add("副本说明", "ok", "已注明上诉状副本份数")
+        else:
+            add("副本说明", "info", "建议注明副本份数（按被上诉人人数提交）")
 
         ok_c = sum(1 for r in results if r["status"] == "ok")
         warn_c = sum(1 for r in results if r["status"] == "warning")
         err_c = sum(1 for r in results if r["status"] == "error")
-        overall = "ok" if err_c == 0 and warn_c <= 1 else ("warning" if err_c == 0 else "error")
+        overall = "ok" if err_c == 0 else "error"
         return {"success": True, "results": results,
                 "ok": ok_c, "warnings": warn_c, "errors": err_c,
                 "overall": overall}
