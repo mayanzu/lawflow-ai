@@ -833,40 +833,7 @@ class Handler(ThreadedHandler):
             # 后处理清理
             cleaned = self._clean_appeal_text(text_so_far, info)
 
-            # 兜底：校验发现 error 则重新生成（最多3次）
-            for attempt in range(3):
-                validation = self._validate_appeal(cleaned, info)
-                if validation.get("overall") != "error":
-                    break
-                errors = [r for r in validation["results"] if r["status"] == "error"]
-                if not errors:
-                    break
-                xxx_errors = [e for e in errors if "占位符" in e["check"] or "XXX" in str(e["msg"])]
-                if attempt > 0 and xxx_errors:
-                    print(f"[generate-stream] attempt {attempt+1}: XXX placeholder persists, breaking", flush=True)
-                    break
-                errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
-                print(f"[generate-stream] attempt {attempt+1} errors, regenerating...", flush=True)
-                retry_prompt = f'''上一次的诉状存在以下问题，请重新撰写：
-{errors_text}
-
-【重要】禁止写XXX、XX、[姓名]等占位符。如果找不到姓名，写"（信息不详）"。
-
-判决书原文：
-{ocr_text}
-
-输出：从"民事上诉状"到"安徽国恒律师事务所律师"，只输出正文，禁止任何占位符。'''
-                full_text = []
-                def on_retry(chunk):
-                    if stream_timed_out: return
-                    full_text.append(chunk)
-                    try:
-                        send_sse({"type": "chunk", "content": chunk})
-                    except Exception:
-                        pass
-                _call_ai_stream(retry_prompt, retries=2, callback=on_retry)
-                cleaned = self._clean_appeal_text("".join(full_text), info)
-
+            # 校验（流式不重试，避免客户端重复显示内容——最终兜底会替换占位符）
             # 最终兜底：替换残留占位符
             import re as _re
             _p = info.get("原告") or info.get("上诉人") or "（信息不详）"

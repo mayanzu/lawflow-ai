@@ -85,28 +85,56 @@ export default function ResultPage() {
     try {
       const infoStr = localStorage.getItem('lw_analyze_info') || '{}'
       const ocrText = localStorage.getItem('lw_ocr_text') || ''
-      // 非流式接口，结果完整后直接显示
-      const res = await fetch('/api/generate-appeal', {
+      const res = await fetch('/api/generate-appeal-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ info: JSON.parse(infoStr), ocr_text: ocrText }),
       })
-      if (!res.ok) { setIsGenerating(false); setStreamDone(true); return }
-      const data = await res.json()
-      if (data.success && data.appeal) {
-        const finalText = data.appeal
-        setEditedText(finalText)
-        setStreamingText(finalText)
-        localStorage.setItem('lw_appeal_text', finalText)
-        try {
-          const hist = JSON.parse(localStorage.getItem('lw_history') || '[]')
-          const fid = localStorage.getItem('lw_file_id') || ''
-          const idx = hist.findIndex((h: any) => h.id === fid)
-          if (idx >= 0) { hist[idx].appealText = finalText; localStorage.setItem('lw_history', JSON.stringify(hist)) }
-        } catch {}
-        if (data.legal_basis?.length > 0) {
-          setLegalBasis(data.legal_basis)
-          localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis))
+      if (!res.ok) { setIsGenerating(false); return }
+      const reader = res.body?.getReader()
+      if (!reader) { setIsGenerating(false); return }
+      const decoder = new TextDecoder()
+      let buffer = ''
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let eventEnd = buffer.indexOf('\n\n')
+        while (eventEnd >= 0) {
+          const eventData = buffer.slice(0, eventEnd)
+          buffer = buffer.slice(eventEnd + 2)
+          eventEnd = buffer.indexOf('\n\n')
+          for (const line of eventData.split('\n')) {
+            const trimmed = line.trim()
+            if (!trimmed.startsWith('data:')) continue
+            const jsonStr = trimmed.slice(5).trim()
+            if (!jsonStr) continue
+            try {
+              const data = JSON.parse(jsonStr)
+              if (data.type === 'chunk') {
+                setStreamingText(prev => prev + data.content)
+              } else if (data.type === 'done') {
+                const finalText = (data.appeal || '').trim()
+                setEditedText(finalText)
+                setStreamingText(finalText)
+                localStorage.setItem('lw_appeal_text', finalText)
+                try {
+                  const hist = JSON.parse(localStorage.getItem('lw_history') || '[]')
+                  const fid = localStorage.getItem('lw_file_id') || ''
+                  const idx = hist.findIndex((h: any) => h.id === fid)
+                  if (idx >= 0) { hist[idx].appealText = finalText; localStorage.setItem('lw_history', JSON.stringify(hist)) }
+                } catch {}
+                if (data.legal_basis?.length > 0) {
+                  setLegalBasis(data.legal_basis)
+                  localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis))
+                }
+                setStreamDone(true)
+                setIsGenerating(false)
+              } else if (data.type === 'error') {
+                setIsGenerating(false)
+              }
+            } catch { /* skip bad SSE line */ }
+          }
         }
       }
     } catch { setIsGenerating(false) }
