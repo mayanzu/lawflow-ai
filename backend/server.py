@@ -801,6 +801,34 @@ class Handler(ThreadedHandler):
             # 后处理清理
             cleaned = self._clean_appeal_text(text_so_far, info)
 
+            # 兜底：校验发现 error 则重新生成
+            for attempt in range(3):
+                validation = self._validate_appeal(cleaned, info)
+                if validation.get("overall") != "error":
+                    break
+                errors = [r for r in validation["results"] if r["status"] == "error"]
+                if not errors:
+                    break
+                errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
+                print(f"[generate-stream] attempt {attempt+1} errors, regenerating...", flush=True)
+                retry_prompt = f'''上一次的诉状存在以下问题，请重新撰写并修复：
+{errors_text}
+
+案件信息：
+{json.dumps(info, ensure_ascii=False, indent=2)}
+
+输出：从"民事上诉状"到"安徽国恒律师事务所律师"，只输出正文。'''
+                full_text = []
+                def on_retry(chunk):
+                    if stream_timed_out: return
+                    full_text.append(chunk)
+                    try:
+                        send_sse({"type": "chunk", "content": chunk})
+                    except Exception:
+                        pass
+                _call_ai_stream(retry_prompt, retries=2, callback=on_retry)
+                cleaned = self._clean_appeal_text("".join(full_text), info)
+
             legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", cleaned)
             legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
             send_sse({"type": "done", "appeal": cleaned, "legal_basis": legal_basis})
@@ -884,8 +912,32 @@ class Handler(ThreadedHandler):
 输出要求：严格按上述7个部分的格式输出，不要删减任何部分，不要添加任何说明性文字。
 从"民事上诉状"开始，到"安徽国恒律师事务所律师"结束。'''
 
-        text = _call_ai(prompt, "你是文书写作AI。不要前言后语，只输出民事上诉状正文，不要任何说明文字。")
-        text = self._clean_appeal_text(text, info)
+        def do_generate():
+            text = _call_ai(prompt, "你是文书写作AI。不要前言后语，只输出民事上诉状正文，不要任何说明文字。")
+            return self._clean_appeal_text(text, info)
+
+        text = do_generate()
+
+        # 兜底：校验发现 error 则重新生成（prompt 已优化，此为保险）
+        for attempt in range(3):
+            validation = self._validate_appeal(text, info)
+            if validation.get("overall") != "error":
+                break
+            errors = [r for r in validation["results"] if r["status"] == "error"]
+            if not errors:
+                break
+            errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
+            print(f"[generate] attempt {attempt+1} errors, regenerating: {errors_text[:200]}", flush=True)
+            fix_prompt = f'''上一次的诉状存在以下问题，请重新撰写并修复：
+{errors_text}
+
+案件信息：
+{json.dumps(info, ensure_ascii=False, indent=2)}
+
+输出：从"民事上诉状"到"安徽国恒律师事务所律师"，只输出正文，不要任何说明。'''
+            text = _call_ai(fix_prompt, "你是文书写作AI。只输出民事上诉状正文，不要说明。")
+            text = self._clean_appeal_text(text, info)
+
         legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
         legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
         return {"success": True, "appeal": text, "legal_basis": legal_basis}
