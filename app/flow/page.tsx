@@ -102,7 +102,10 @@ function FlowContent() {
           setStepStatus(2, 'done', 100, '完成')
         }
         setAnalyzeInfo(analyzeRes.info)
-        setInfoFields({ ...analyzeRes.info })
+        setInfoFields({
+          ...analyzeRes.info,
+          判决日期: toDateInputVal(analyzeRes.info.判决日期)
+        })
       } else {
         localStorage.removeItem('lw_analyze_info')
         localStorage.removeItem('lw_missing_fields')
@@ -113,6 +116,15 @@ function FlowContent() {
     }
 
     setIsDone(true)
+  }
+
+  // 转换日期为 YYYY-MM-DD
+  function toDateInputVal(s: string): string {
+    if (!s || typeof s !== 'string') return ''
+    const m = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
+    if (m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s
+    return ''
   }
 
   function handleGoToConfirm() {
