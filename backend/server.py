@@ -712,33 +712,49 @@ class Handler(ThreadedHandler):
         stream_timed_out = False
 
         # 使用与 _generate 相同的强化 prompt
-        prompt = f'''你是安徽国恒律师事务所赵光辉律师。请根据以下案件信息撰写民事上诉状。
+        prompt = f'''你是安徽国恒律师事务所的资深诉讼律师赵光辉。任务是撰写一份完整的、可直接提交法院的民事上诉状。
 
-## 案件信息
+## 绝对禁止
+- Markdown符号：** ## --- ``` ``
+- 前言：如"根据..."、"以下是..."
+- 后缀：如"使用提示"、"注意事项"
+- emoji、占位符：XXX、[姓名]、（此处填写...）
+
+## 7个必须包含的部分
+
+【1 标题】民事上诉状（单独一行）
+
+【2 当事人】
+上诉人（原审原告/原审被告）：[原告全名]
+被上诉人（原审被告/原审原告）：[被告全名]
+
+【3 上诉请求】2-3项，每项独立成段，如：
+一、撤销[原审法院][案号]判决第X项
+二、改判[具体内容]
+三、[其他诉求]
+
+【4 事实与理由】分3段以上，每段：事实→法律依据→结论
+引用法律条文要写全称和具体条号，如《民事诉讼法》第170条
+
+【5 结尾】
+此致
+[上诉法院全称]
+
+【6 上诉人署名】
+上诉人：[原告全名]
+[年]年[月]月[日]日
+
+【7 委托代理人】
+委托代理人：赵光辉
+安徽国恒律师事务所律师
+
+## 案件信息（必须从这里取当事人名称，不要编造）
 {json.dumps(info, ensure_ascii=False, indent=2)}
 
-## 判决书原文
-{ocr_text}
+## 判决书原文（用于提取事实）
+{ocr_text[:3000]}
 
-## 【格式要求】
-必须包含以下部分（按顺序）：
-1. 标题：民事上诉状
-2. 上诉人/被上诉人信息（从上方案件信息中提取姓名）
-3. 上诉请求（2-3项具体请求）
-4. 事实与理由（分3点以上，每点含法律依据）
-5. 结尾：此致 + 上诉法院全称
-6. 署名：上诉人姓名（从案件信息提取）
-7. 委托代理人：安徽国恒律师事务所 赵光辉 律师
-
-## 【绝对禁止】
-❌ 禁止任何Markdown符号（** # --- ` ```）
-❌ 禁止前言说明（"以下是..." "根据..."）
-❌ 禁止后缀提示（"如需..." "注意..."）
-❌ 禁止emoji
-❌ 禁止占位符（"XXX" "..." "年 月 日"）
-❌ 禁止省略任何署名
-
-直接输出文书正文，不要任何额外文字。'''
+输出：从"民事上诉状"到"安徽国恒律师事务所律师"，不要任何说明文字。'''
 
         def send_sse(data_dict):
             try:
@@ -785,33 +801,6 @@ class Handler(ThreadedHandler):
             # 后处理清理
             cleaned = self._clean_appeal_text(text_so_far, info)
 
-            # 自我修复：校验发现 error 则重新生成（流式版本先输出草稿，最后再发最终版本）
-            for attempt in range(3):
-                validation = self._validate_appeal(cleaned, info)
-                if validation.get("overall") != "error":
-                    break
-                errors = [r for r in validation["results"] if r["status"] == "error"]
-                errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
-                print(f"[generate-stream] attempt {attempt+1} errors, regenerating...", flush=True)
-                retry_prompt = f'''上一次的诉状存在以下问题，请重新撰写并修复：
-{errors_text}
-
-案件信息：
-{json.dumps(info, ensure_ascii=False, indent=2)}
-
-要求：直接输出修复后的民事上诉状正文，从"民事上诉状"标题开始，到"委托代理人"结束。
-只输出正文，不要任何说明。'''
-                full_text = []
-                def on_retry(chunk):
-                    if stream_timed_out: return
-                    full_text.append(chunk)
-                    try:
-                        send_sse({"type": "chunk", "content": chunk})
-                    except Exception:
-                        pass
-                _call_ai_stream(retry_prompt, retries=2, callback=on_retry)
-                cleaned = self._clean_appeal_text("".join(full_text), info)
-
             legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", cleaned)
             legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
             send_sse({"type": "done", "appeal": cleaned, "legal_basis": legal_basis})
@@ -834,58 +823,69 @@ class Handler(ThreadedHandler):
         firm = "安徽国恒律师事务所"
         attorney = "赵光辉"
 
-        def build_prompt():
-            return f'''你是安徽国恒律师事务所的资深诉讼律师{attorney}，专注民商事诉讼二十年。
+        prompt = f'''你是安徽国恒律师事务所的资深诉讼律师{attorney}。你的任务是撰写一份完整的、可直接提交法院的民事上诉状。
 
-请根据以下判决书信息，撰写一份完整的、可直接提交人民法院的《民事上诉状》。
+## 绝对禁止（违反任何一条文书直接报废）
+- 禁止任何Markdown符号：** ## --- ```` ```
+- 禁止任何前言：如"根据..."、"以下是..."、"现将..."
+- 禁止任何后缀提示：如"使用提示"、"注意事项"、"注："
+- 禁止emoji符号
+- 禁止占位符：XXX、XX、[姓名]、[日期] 等必须填入真实内容
+- 禁止空白段落或"（此处填写...）"类占位说明
 
-## 案件信息
+## 必须包含的全部内容（共7个部分，缺一不可）
+
+【第一部分：标题】
+民事上诉状
+（单独一行，无其他内容）
+
+【第二部分：当事人信息】
+上诉人（原审原告/原审被告）：[原告全名]，……（身份证号等身份信息）
+被上诉人（原审被告/原审原告）：[被告全名]，……
+（注意：如果判决书没有提供某方详细身份信息，只写姓名也可，但格式必须正确）
+
+【第三部分：上诉请求】（必须列明2-3项，每项独立成段）
+一、撤销[原审法院名称]（[案号]民事判决第X项，改判为……
+二、改判[具体改判内容，如：上诉人无需承担XX责任]
+三、[其他具体诉求]
+
+【第四部分：事实与理由】（分3段以上，每段结构为：事实陈述→法律依据→结论）
+一、[具体事实1，根据判决书原审查明的事实]
+    法律依据：《中华人民共和国民事诉讼法》第X条……
+    结论：……
+
+二、[具体事实2，涉及程序违法或事实认定错误]
+    法律依据：《最高人民法院关于适用〈中华人民共和国民事诉讼法〉的解释》第X条……
+    结论：……
+
+三、[具体事实3，新证据或法律适用错误]
+    法律依据：《中华人民共和国[相关法律]》第X条……
+    结论：……
+
+【第五部分：此致敬礼】
+此致
+[上诉法院全称，如：XX市中级人民法院]
+
+【第六部分：上诉人署名】
+上诉人：[原告全名]（自然人签字）
+（如果是单位上诉）：上诉人：[单位全称]（加盖公章）
+[年]年[月]月[日]日
+
+【第七部分：委托代理人】
+委托代理人：赵光辉
+安徽国恒律师事务所律师
+
+## 案件信息（当事人名称、上诉法院等必须从这里取，不要编造）
 {json.dumps(info, ensure_ascii=False, indent=2)}
 
-## 判决书原文
-{ocr_text}
+## 判决书原文（参考提取事实与理由）
+{ocr_text[:3000]}
 
-## 写作要求
-禁止Markdown符号、前言说明、后缀注释、emoji、占位符（XXX、XX等）。
-当事人名称、金额、日期必须与判决书完全一致。
+输出要求：严格按上述7个部分的格式输出，不要删减任何部分，不要添加任何说明性文字。
+从"民事上诉状"开始，到"安徽国恒律师事务所律师"结束。'''
 
-格式要求：
-1. 以"民事上诉状"标题开头
-2. 上诉人、被上诉人信息完整（当事人名称必须来自案件信息）
-3. 上诉请求列明2-3项，每项具体（如：撤销...改判...）
-4. 事实与理由至少分三点，每点含：具体事实 + 法律依据（引用具体条文） + 结论
-5. 结尾：此致 + 上诉法院全称 + 上诉人姓名 + 委托代理人：{firm} {attorney} 律师
-6. 全文纯文本，无任何标记符号
-
-只输出文书正文，多一个字都不要。'''
-
-        def fix_prompt(errors_text):
-            return f'''上一次的诉状存在以下问题，请重新撰写并修复：
-
-{errors_text}
-
-案件信息：
-{json.dumps(info, ensure_ascii=False, indent=2)}
-
-要求：直接输出修复后的民事上诉状正文，从"民事上诉状"标题开始，到"委托代理人"结束。
-只输出正文，不要任何说明。'''
-
-        def do_generate():
-            text = _call_ai(build_prompt(), "你是文书写作AI。不要任何前言后语，直接输出民事上诉状正文纯文本，不含Markdown。")
-            return self._clean_appeal_text(text, info)
-
-        text = do_generate()
-
-        # 自我修复：校验发现 error 则重新生成
-        for attempt in range(3):
-            validation = self._validate_appeal(text, info)
-            if validation.get("overall") != "error":
-                break
-            errors = [r for r in validation["results"] if r["status"] == "error"]
-            errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
-            print(f"[generate] attempt {attempt+1} had errors, regenerating: {errors_text[:200]}", flush=True)
-            text = do_generate()
-
+        text = _call_ai(prompt, "你是文书写作AI。不要前言后语，只输出民事上诉状正文，不要任何说明文字。")
+        text = self._clean_appeal_text(text, info)
         legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
         legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
         return {"success": True, "appeal": text, "legal_basis": legal_basis}
