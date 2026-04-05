@@ -45,13 +45,37 @@ export default function ConfirmPage() {
     return null
   }
 
+  // 解析中文日期 "2025年3月15日" 或标准 "2025-03-15"
+  function parseChineseDate(s: string): Date | null {
+    if (!s || s.trim() === '') return null
+    // 标准格式
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(s + 'T00:00:00')
+    // 中文格式: 2025年3月15日
+    const m = s.match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
+    if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]))
+    return null
+  }
+
+  // 转换中文日期为 YYYY-MM-DD
+  function toDateString(s: string): string {
+    if (!s) return ''
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s // 已经是标准格式
+    const d = parseChineseDate(s)
+    if (d && !isNaN(d.getTime())) {
+      const mm = String(d.getMonth() + 1).padStart(2, '0')
+      const dd = String(d.getDate()).padStart(2, '0')
+      return `${d.getFullYear()}-${mm}-${dd}`
+    }
+    return ''
+  }
+
   function calcDeadline(判决日期: string, 上诉期限: string) {
-    if (!判决日期) return
+    const d = parseChineseDate(判决日期)
+    if (!d || isNaN(d.getTime())) return
     const days = parseInt(上诉期限) || 15
-    const deadline = new Date(判决日期)
-    deadline.setDate(deadline.getDate() + days)
-    setAppealDeadline(deadline.getTime())
-    setDaysLeft(Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
+    d.setDate(d.getDate() + days)
+    setAppealDeadline(d.getTime())
+    setDaysLeft(Math.ceil((d.getTime() - Date.now()) / (1000 * 60 * 60 * 24)))
   }
 
   function handleFieldChange(field: keyof Info, value: string) {
@@ -79,7 +103,7 @@ export default function ConfirmPage() {
           案号: parsed.案号||'', 案由: parsed.案由||'', 原告: parsed.原告||'',
           被告: parsed.被告||'', 判决法院: parsed.判决法院||'',
           判决结果: parsed.判决结果||'', 上诉期限: parsed.上诉期限||'',
-          上诉法院: parsed.上诉法院||'', 判决日期: parsed.判决日期||''
+          上诉法院: parsed.上诉法院||'', 判决日期: toDateString(parsed.判决日期 || '')
         }
         setInfo(parsedInfo)
         if (parsedInfo.判决日期 || parsedInfo.上诉期限)
