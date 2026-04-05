@@ -92,10 +92,19 @@ function FlowContent() {
       const analyzeRes = await callApi('/api/analyze', { text })
       if (analyzeRes.success && analyzeRes.info) {
         localStorage.setItem('lw_analyze_info', JSON.stringify(analyzeRes.info))
+        // 标记缺失字段
+        if (analyzeRes.missing_fields?.length > 0) {
+          localStorage.setItem('lw_missing_fields', JSON.stringify(analyzeRes.missing_fields))
+          setStepStatus(2, 'done', 80, `完成（${analyzeRes.missing_fields.length}个字段需补充）`)
+        } else {
+          localStorage.removeItem('lw_missing_fields')
+          setStepStatus(2, 'done', 100, '完成')
+        }
         setAnalyzeInfo(analyzeRes.info)
-        setStepStatus(2, 'done', 100, '完成')
       } else {
-        setStepStatus(2, 'done', 100, '完成（可手动填写）')
+        localStorage.removeItem('lw_analyze_info')
+        localStorage.removeItem('lw_missing_fields')
+        setStepStatus(2, 'done', 100, '完成（请手动填写）')
       }
     } catch {
       setStepStatus(2, 'done', 100, '完成（可手动填写）')

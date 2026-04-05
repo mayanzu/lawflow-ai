@@ -598,7 +598,7 @@ class Handler(ThreadedHandler):
         txt = body.get("text", "")
         if not txt:
             return {"success": False, "error": "No text"}
-        text_chunk = txt[:3500]
+        text_chunk = txt[:7000]
 
         REQUIRED_FIELDS = ["案号","案由","原告","被告","判决法院","判决日期","判决结果","上诉期限","上诉法院"]
 
@@ -679,13 +679,25 @@ class Handler(ThreadedHandler):
                             info[f] = info_retry[f]
                     missing = [f for f in missing if not info.get(f) or str(info.get(f)).strip() in ("","无","未提取")]
 
-        if info:
-            for f in REQUIRED_FIELDS:
-                if not info.get(f) or str(info.get(f)).strip() in ("","无","未提取","null"):
-                    info[f] = "未提取"
-            return {"success": True, "info": info}
+        # 检查实际提取到的有效字段（排除"未提取"等占位符）
+        valid_fields = {}
+        empty_placeholders = ("","无","未提取","null","undefined","错误")
+        for f in REQUIRED_FIELDS:
+            v = info.get(f, "")
+            if v and str(v).strip() not in empty_placeholders:
+                valid_fields[f] = str(v).strip()
 
-        return {"success": True, "info": {"raw": r if r else ""}}
+        missing = [f for f in REQUIRED_FIELDS if f not in valid_fields]
+        all_missing = len(valid_fields) == 0
+        print(f"[analyze] valid={list(valid_fields.keys())}, missing={missing}", flush=True)
+
+        # 全部字段都未提取到 -> 返回失败，让用户手动填写
+        if all_missing:
+            return {"success": False, "error": "未能从判决书中提取到有效信息，请手动填写", "partial": False}
+
+        # 部分字段提取到 -> 返回已提取的，允许前端编辑补充
+        result_info = {f: valid_fields.get(f, "") for f in REQUIRED_FIELDS}
+        return {"success": True, "info": result_info, "partial": True, "missing_fields": missing}
 
 
     def _generate_stream(self, body):
