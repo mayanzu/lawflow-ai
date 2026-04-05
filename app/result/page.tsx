@@ -159,22 +159,6 @@ export default function ResultPage() {
     }
   }
 
-    try { info = JSON.parse(infoRaw) } catch {}
-    setIsValidating(true)
-    setShowValidate(true)
-    try {
-      const res = await fetch('http://163.7.1.176:3457/validate-appeal', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ appeal_text: text, info })
-      })
-      const data = await res.json()
-      setValidateResults(data)
-    } catch (e: any) {
-      setValidateResults({ success: false, error: e.message })
-    }
-    setIsValidating(false)
-  }
 
   function handleRegenerate() {
     if (!confirm('重新生成将清空当前内容，确定继续？')) return
@@ -223,7 +207,7 @@ export default function ResultPage() {
               <p style={{ fontSize: 12, color: '#86868B', margin: 0 }}>{editedText.length.toLocaleString()} 字</p>
             </div>
             <div style={{ display: 'flex', gap: 12 }}>
-                            <button onClick={() => setIsEditing(true)} style={{ padding: '10px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>编辑</button>
+              <button onClick={() => setIsEditing(true)} style={{ padding: '10px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>编辑</button>
               <button onClick={handleRegenerate} style={{ padding: '10px 20px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 980, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>新建任务</button>
             </div>
           </div>
@@ -256,12 +240,6 @@ export default function ResultPage() {
         )}
 
         {/* 校验结果 */}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        )}
-
         {/* 法律依据 */}
         {legalBasis.length > 0 && (
           <div style={{ marginTop: 32 }}>
