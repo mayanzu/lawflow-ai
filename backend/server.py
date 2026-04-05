@@ -748,10 +748,22 @@ class Handler(ThreadedHandler):
 委托代理人：赵光辉
 安徽国恒律师事务所律师
 
-## 案件信息（必须从这里取当事人名称，不要编造）
+## 案件信息（部分字段可能为空，请以下方判决书原文为准）
 {json.dumps(info, ensure_ascii=False, indent=2)}
 
-## 判决书原文（用于提取事实）
+## 判决书原文（上诉人、被上诉人姓名必须从此处提取，禁止用占位符）
+{ocr_text}
+
+【重要】从判决书原文中查找：
+- "上诉人（原审原告/原审被告）："后面的人名
+- "被上诉人（原审被告/原审原告）："后面的人名
+- 禁止写 XXX、XX、[姓名] 等占位符，必须填入真实人名
+{json.dumps(info, ensure_ascii=False, indent=2)}
+
+## 判决书原文（当事人名称必须从判决书中提取）
+{ocr_text}
+
+【重要】上诉人、被上诉人的真实姓名必须从上面的判决书原文中查找并填入。绝对不要写 XXX 、XX 、[姓名] 等占位符。
 {ocr_text}
 
 输出：从"民事上诉状"到"安徽国恒律师事务所律师"，不要任何说明文字。'''
@@ -903,7 +915,7 @@ class Handler(ThreadedHandler):
 委托代理人：赵光辉
 安徽国恒律师事务所律师
 
-## 案件信息（当事人名称、上诉法院等必须从这里取，不要编造）
+## 案件信息（用于上诉法院、案号等；当事人姓名请从下方判决书原文中提取）
 {json.dumps(info, ensure_ascii=False, indent=2)}
 
 ## 判决书原文（参考提取事实与理由）
@@ -913,7 +925,7 @@ class Handler(ThreadedHandler):
 从"民事上诉状"开始，到"安徽国恒律师事务所律师"结束。'''
 
         def do_generate():
-            text = _call_ai(prompt, "你是文书写作AI。不要前言后语，只输出民事上诉状正文，不要任何说明文字。")
+            text = _call_ai(prompt, "你是专业法律文书写作AI。上诉状必须使用真实人名，禁止任何占位符（XXX、XX、[姓名]）。只输出正文，不要前言说明。")
             return self._clean_appeal_text(text, info)
 
         text = do_generate()
@@ -931,11 +943,11 @@ class Handler(ThreadedHandler):
             fix_prompt = f'''上一次的诉状存在以下问题，请重新撰写并修复：
 {errors_text}
 
-案件信息：
-{json.dumps(info, ensure_ascii=False, indent=2)}
+【关键】上诉人、被上诉人的真实姓名必须从判决书原文中提取（案件信息中的姓名字段可能为空）：
+{ocr_text[:2000]}
 
-输出：从"民事上诉状"到"安徽国恒律师事务所律师"，只输出正文，不要任何说明。'''
-            text = _call_ai(fix_prompt, "你是文书写作AI。只输出民事上诉状正文，不要说明。")
+输出：从"民事上诉状"到"安徽国恒律师事务所律师"，只输出正文，禁止任何占位符。'''
+            text = _call_ai(fix_prompt, "你是专业法律文书写作AI。上诉状必须使用真实人名，禁止占位符。")
             text = self._clean_appeal_text(text, info)
 
         legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
