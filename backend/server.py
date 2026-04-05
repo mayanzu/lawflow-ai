@@ -813,7 +813,7 @@ class Handler(ThreadedHandler):
             # 后处理清理
             cleaned = self._clean_appeal_text(text_so_far, info)
 
-            # 兜底：校验发现 error 则重新生成
+            # 兜底：校验发现 error 则重新生成（最多3次）
             for attempt in range(3):
                 validation = self._validate_appeal(cleaned, info)
                 if validation.get("overall") != "error":
@@ -821,15 +821,21 @@ class Handler(ThreadedHandler):
                 errors = [r for r in validation["results"] if r["status"] == "error"]
                 if not errors:
                     break
+                xxx_errors = [e for e in errors if "占位符" in e["check"] or "XXX" in str(e["msg"])]
+                if attempt > 0 and xxx_errors:
+                    print(f"[generate-stream] attempt {attempt+1}: XXX placeholder persists, breaking", flush=True)
+                    break
                 errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
                 print(f"[generate-stream] attempt {attempt+1} errors, regenerating...", flush=True)
-                retry_prompt = f'''上一次的诉状存在以下问题，请重新撰写并修复：
+                retry_prompt = f'''上一次的诉状存在以下问题，请重新撰写：
 {errors_text}
 
-案件信息：
-{json.dumps(info, ensure_ascii=False, indent=2)}
+【重要】禁止写XXX、XX、[姓名]等占位符。如果找不到姓名，写"（信息不详）"。
 
-输出：从"民事上诉状"到"安徽国恒律师事务所律师"，只输出正文。'''
+判决书原文：
+{ocr_text}
+
+输出：从"民事上诉状"到"安徽国恒律师事务所律师"，只输出正文，禁止任何占位符。'''
                 full_text = []
                 def on_retry(chunk):
                     if stream_timed_out: return
@@ -840,6 +846,16 @@ class Handler(ThreadedHandler):
                         pass
                 _call_ai_stream(retry_prompt, retries=2, callback=on_retry)
                 cleaned = self._clean_appeal_text("".join(full_text), info)
+
+            # 最终兜底：替换残留占位符
+            import re as _re
+            _p = info.get("原告") or info.get("上诉人") or "（信息不详）"
+            _d = info.get("被告") or info.get("被上诉人") or "（信息不详）"
+            for _old, _new in [("XXX", _p), ("XX", _d), ("[上诉人]", _p), ("[被上诉人]", _d), ("[姓名]", _p)]:
+                if _old in cleaned:
+                    cleaned = cleaned.replace(_old, _new)
+            cleaned = _re.sub(r"\[.*?\]", "（信息不详）", cleaned)
+            cleaned = _re.sub(r"X{2,}", _p, cleaned)
 
             legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", cleaned)
             legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
@@ -930,7 +946,7 @@ class Handler(ThreadedHandler):
 
         text = do_generate()
 
-        # 兜底：校验发现 error 则重新生成（prompt 已优化，此为保险）
+        # 兜底：校验发现 error 则重新生成（最多3次）
         for attempt in range(3):
             validation = self._validate_appeal(text, info)
             if validation.get("overall") != "error":
@@ -938,17 +954,33 @@ class Handler(ThreadedHandler):
             errors = [r for r in validation["results"] if r["status"] == "error"]
             if not errors:
                 break
+            xxx_errors = [e for e in errors if "占位符" in e["check"] or "XXX" in str(e["msg"])]
+            if attempt > 0 and xxx_errors:
+                print(f"[generate] attempt {attempt+1}: XXX placeholder persists, breaking", flush=True)
+                break
             errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
             print(f"[generate] attempt {attempt+1} errors, regenerating: {errors_text[:200]}", flush=True)
-            fix_prompt = f'''上一次的诉状存在以下问题，请重新撰写并修复：
+            fix_prompt = f'''上一次的诉状存在以下问题，请重新撰写：
 {errors_text}
 
-【关键】上诉人、被上诉人的真实姓名必须从判决书原文中提取（案件信息中的姓名字段可能为空）：
-{ocr_text[:2000]}
+【重要】禁止写XXX、XX、[姓名]等占位符。如果判决书中确实找不到姓名，写"（信息不详）"，不要留空。
+
+判决书原文：
+{ocr_text}
 
 输出：从"民事上诉状"到"安徽国恒律师事务所律师"，只输出正文，禁止任何占位符。'''
             text = _call_ai(fix_prompt, "你是专业法律文书写作AI。上诉状必须使用真实人名，禁止占位符。")
             text = self._clean_appeal_text(text, info)
+
+        # 最终兜底：替换残留的 XXX 等占位符
+        import re as _re
+        _p = info.get("原告") or info.get("上诉人") or "（信息不详）"
+        _d = info.get("被告") or info.get("被上诉人") or "（信息不详）"
+        for _old, _new in [("XXX", _p), ("XX", _d), ("[上诉人]", _p), ("[被上诉人]", _d), ("[姓名]", _p)]:
+            if _old in text:
+                text = text.replace(_old, _new)
+        text = _re.sub(r"\[.*?\]", "（信息不详）", text)
+        text = _re.sub(r"X{2,}", _p, text)
 
         legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
         legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
