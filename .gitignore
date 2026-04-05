@@ -11,3 +11,6 @@ uploads/
 scripts/
 .env
 scripts/
+
+# Next.js build output
+.next/
