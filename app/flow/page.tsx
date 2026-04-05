@@ -33,6 +33,7 @@ function FlowContent() {
   const [fileName, setFileName] = useState('')
   const [isDone, setIsDone] = useState(false)
   const [analyzeInfo, setAnalyzeInfo] = useState<any>(null)
+  const [infoFields, setInfoFields] = useState<Record<string, string>>({})
 
   const processRef = useRef<boolean>(false)
   const fileIdRef = useRef<string>('')
@@ -101,6 +102,7 @@ function FlowContent() {
           setStepStatus(2, 'done', 100, '完成')
         }
         setAnalyzeInfo(analyzeRes.info)
+        setInfoFields({ ...analyzeRes.info })
       } else {
         localStorage.removeItem('lw_analyze_info')
         localStorage.removeItem('lw_missing_fields')
@@ -173,21 +175,52 @@ function FlowContent() {
           ))}
         </div>
 
-        {/* AI 分析结果预览 */}
+        {/* AI 分析结果（可编辑） */}
         {isDone && analyzeInfo && (
           <div style={{ background: '#F8F9FA', borderRadius: 16, overflow: 'hidden', marginBottom: 32 }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #E8E8ED' }}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', marginBottom: 16 }}>AI 提取的案件信息</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em' }}>AI 提取的案件信息（可编辑修正）</div>
+                {Object.keys(infoFields).length > 0 && <div style={{ fontSize: 10, color: '#86868B' }}>点击字段即可修改</div>}
+              </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                {(['案号', '案由', '原告', '被告', '判决法院', '判决日期', '判决结果', '上诉期限', '上诉法院'] as const).map(k => {
-                  const v = analyzeInfo[k]
-                  const valid = v && typeof v === 'string' && v.trim() !== '' && v.trim() !== '无' && v.trim() !== '未提取'
+                {(['案号', '案由', '原告', '被告', '判决法院', '判决日期', '上诉期限', '上诉法院'] as const).map(k => {
+                  const v = infoFields[k] || ''
                   return (
-                    <div key={k} style={{ padding: '8px 10px', background: valid ? '#FFFFFF' : '#FFF8F0', borderRadius: 8 }}>
+                    <div key={k} style={{ background: '#FFFFFF', borderRadius: 8, padding: '8px 10px', border: '1px solid #E8E8ED' }}>
                       <div style={{ fontSize: 10, fontWeight: 600, color: '#86868B', letterSpacing: '0.04em', marginBottom: 2 }}>{k}</div>
-                      <div style={{ fontSize: 13, fontWeight: 500, color: valid ? '#1D1D1F' : '#E65100', lineHeight: 1.4 }}>
-                        {valid ? v : '待确认'}
-                      </div>
+                      <input
+                        type={k === '判决日期' ? 'date' : 'text'}
+                        value={v}
+                        onChange={e => {
+                          const update = { ...infoFields, [k]: e.target.value }
+                          setInfoFields(update)
+                          localStorage.setItem('lw_analyze_info', JSON.stringify(update))
+                        }}
+                        style={{ width: '100%', border: 'none', outline: 'none', fontSize: 13, fontWeight: 500, color: '#1D1D1F', background: 'transparent', fontFamily: 'inherit', padding: '2px 0', boxSizing: 'border-box' }}
+                        placeholder={'未提取'}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12, marginTop: 12 }}>
+                {(['判决结果'] as const).map(k => {
+                  const v = infoFields[k] || ''
+                  return (
+                    <div key={k} style={{ background: '#FFFFFF', borderRadius: 8, padding: '8px 10px', border: '1px solid #E8E8ED' }}>
+                      <div style={{ fontSize: 10, fontWeight: 600, color: '#86868B', letterSpacing: '0.04em', marginBottom: 2 }}>{k}</div>
+                      <textarea
+                        value={v}
+                        onChange={e => {
+                          const update = { ...infoFields, [k]: e.target.value }
+                          setInfoFields(update)
+                          localStorage.setItem('lw_analyze_info', JSON.stringify(update))
+                        }}
+                        rows={2}
+                        style={{ width: '100%', border: 'none', outline: 'none', fontSize: 13, color: '#1D1D1F', background: 'transparent', fontFamily: 'inherit', padding: '2px 0', resize: 'vertical', boxSizing: 'border-box' }}
+                        placeholder={'未提取'}
+                      />
                     </div>
                   )
                 })}
