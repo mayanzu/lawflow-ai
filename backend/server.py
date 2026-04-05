@@ -712,6 +712,24 @@ class Handler(ThreadedHandler):
         stream_timed_out = False
 
         # 使用与 _generate 相同的强化 prompt
+        # 从OCR原文直接提取当事人姓名
+        import re
+        def _get_party(ocr, info, key):
+            v = info.get(key) or ""
+            if v and v not in ("", "未提取", "（信息不详）"):
+                return v
+            for pat in [
+                r"上诉人[（(]原审原告[）)][：:]*\s*([^\n\r\s,，,。]+)",
+                r"上诉人[：:]\s*([^\n\r\s,，,。]+)",
+                r"原告[：:]\s*([^\n\r\s,，,。]+)",
+            ]:
+                m = re.search(pat, ocr)
+                if m and len(m.group(1).strip()) >= 2:
+                    return m.group(1).strip()
+            return "（信息不详）"
+        plaintiff = _get_party(ocr_text, info, "原告") or _get_party(ocr_text, info, "上诉人") or "（信息不详）"
+        defendant = _get_party(ocr_text, info, "被告") or _get_party(ocr_text, info, "被上诉人") or "（信息不详）"
+
         prompt = f'''你是安徽国恒律师事务所的资深诉讼律师赵光辉。任务是撰写一份完整的、可直接提交法院的民事上诉状。
 
 ## 绝对禁止
@@ -725,8 +743,8 @@ class Handler(ThreadedHandler):
 【1 标题】民事上诉状（单独一行）
 
 【2 当事人】
-上诉人（原审原告/原审被告）：[原告全名]
-被上诉人（原审被告/原审原告）：[被告全名]
+上诉人（原审原告/原审被告）：{plaintiff}
+被上诉人（原审被告/原审原告）：{defendant}
 
 【3 上诉请求】2-3项，每项独立成段，如：
 一、撤销[原审法院][案号]判决第X项
@@ -741,7 +759,7 @@ class Handler(ThreadedHandler):
 [上诉法院全称]
 
 【6 上诉人署名】
-上诉人：[原告全名]
+上诉人：{plaintiff}
 [年]年[月]月[日]日
 
 【7 委托代理人】
@@ -896,8 +914,8 @@ class Handler(ThreadedHandler):
 （单独一行，无其他内容）
 
 【第二部分：当事人信息】
-上诉人（原审原告/原审被告）：[原告全名]，……（身份证号等身份信息）
-被上诉人（原审被告/原审原告）：[被告全名]，……
+上诉人（原审原告/原审被告）：{plaintiff}，……（身份证号等身份信息）
+被上诉人（原审被告/原审原告）：{defendant}，……
 （注意：如果判决书没有提供某方详细身份信息，只写姓名也可，但格式必须正确）
 
 【第三部分：上诉请求】（必须列明2-3项，每项独立成段）
@@ -923,7 +941,7 @@ class Handler(ThreadedHandler):
 [上诉法院全称，如：XX市中级人民法院]
 
 【第六部分：上诉人署名】
-上诉人：[原告全名]（自然人签字）
+上诉人：{plaintiff}（自然人签字）
 （如果是单位上诉）：上诉人：[单位全称]（加盖公章）
 [年]年[月]月[日]日
 
@@ -940,8 +958,41 @@ class Handler(ThreadedHandler):
 输出要求：严格按上述7个部分的格式输出，不要删减任何部分，不要添加任何说明性文字。
 从"民事上诉状"开始，到"安徽国恒律师事务所律师"结束。'''
 
+        def extract_parties_from_ocr(ocr, info):
+            import re
+            plaintiff = info.get("原告") or info.get("上诉人") or ""
+            defendant = info.get("被告") or info.get("被上诉人") or ""
+            if not plaintiff or plaintiff in ("", "未提取", "（信息不详）"):
+                for pat in [
+                    r"上诉人[（(]原审原告[）)][：:]*\s*([^\n\r\s,，,。]+)",
+                    r"上诉人[：:]\s*([^\n\r\s,，,。]+)",
+                    r"原告[：:]\s*([^\n\r\s,，,。]+)",
+                ]:
+                    m = re.search(pat, ocr)
+                    if m and len(m.group(1).strip()) >= 2:
+                        plaintiff = m.group(1).strip()
+                        break
+            if not defendant or defendant in ("", "未提取", "（信息不详）"):
+                for pat in [
+                    r"被上诉人[（(]原审被告[）)][：:]*\s*([^\n\r\s,，,。]+)",
+                    r"被上诉人[：:]\s*([^\n\r\s,，,。]+)",
+                    r"被告[：:]\s*([^\n\r\s,，,。]+)",
+                ]:
+                    m = re.search(pat, ocr)
+                    if m and len(m.group(1).strip()) >= 2:
+                        defendant = m.group(1).strip()
+                        break
+            return plaintiff or "（信息不详）", defendant or "（信息不详）"
+
+        plaintiff, defendant = extract_parties_from_ocr(ocr_text, info)
+        info_for_prompt = {**info, "原告": plaintiff, "被告": defendant}
+        _prompt = prompt.replace(
+            "{json.dumps(info, ensure_ascii=False, indent=2)}",
+            "{json.dumps(info_for_prompt, ensure_ascii=False, indent=2)}"
+        )
+
         def do_generate():
-            text = _call_ai(prompt, "你是专业法律文书写作AI。上诉状必须使用真实人名，禁止任何占位符（XXX、XX、[姓名]）。只输出正文，不要前言说明。")
+            text = _call_ai(_prompt, "你是专业法律文书写作AI。上诉状必须使用真实人名，禁止任何占位符（XXX、XX、[姓名]）。只输出正文，不要前言说明。")
             return self._clean_appeal_text(text, info)
 
         text = do_generate()
