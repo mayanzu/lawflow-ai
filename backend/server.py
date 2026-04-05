@@ -752,7 +752,7 @@ class Handler(ThreadedHandler):
 {json.dumps(info, ensure_ascii=False, indent=2)}
 
 ## 判决书原文（用于提取事实）
-{ocr_text[:3000]}
+{ocr_text}
 
 输出：从"民事上诉状"到"安徽国恒律师事务所律师"，不要任何说明文字。'''
 
@@ -907,7 +907,7 @@ class Handler(ThreadedHandler):
 {json.dumps(info, ensure_ascii=False, indent=2)}
 
 ## 判决书原文（参考提取事实与理由）
-{ocr_text[:3000]}
+{ocr_text}
 
 输出要求：严格按上述7个部分的格式输出，不要删减任何部分，不要添加任何说明性文字。
 从"民事上诉状"开始，到"安徽国恒律师事务所律师"结束。'''
