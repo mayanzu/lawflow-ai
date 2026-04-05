@@ -112,11 +112,14 @@ export default function ResultPage() {
               if (data.type === 'chunk') {
                 setStreamingText(prev => prev + data.content)
               } else if (data.type === 'done') {
-                const finalText = data.appeal || streamingText
-                setEditedText(finalText)
+                const finalText = (data.appeal || '').trim()
+                if (finalText) {
+                  setEditedText(finalText)
+                  setStreamingText(finalText)
+                  localStorage.setItem('lw_appeal_text', finalText)
+                }
                 setStreamDone(true)
                 setIsGenerating(false)
-                localStorage.setItem('lw_appeal_text', finalText)
                 // Update history with appealText
                 try {
                   const hist = JSON.parse(localStorage.getItem('lw_history') || '[]')
