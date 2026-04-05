@@ -114,7 +114,7 @@ function FlowContent() {
   }
 
   function handleGoToConfirm() {
-    router.push('/confirm')
+    router.push('/result')
   }
 
   useEffect(() => {
