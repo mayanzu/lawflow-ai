@@ -141,7 +141,33 @@ export default function ResultPage() {
 
 
   function handleCopy() {
-    navigator.clipboard.writeText(editedText).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+    // 优先用 Clipboard API，fallback 用传统方法
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(editedText).then(() => {
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      }).catch(() => fallbackCopy())
+    } else {
+      fallbackCopy()
+    }
+  }
+
+  function fallbackCopy() {
+    const ta = document.createElement('textarea')
+    ta.value = editedText
+    ta.style.position = 'fixed'
+    ta.style.left = '-9999px'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (e) {
+      // 最终 fallback：alert 提示
+      alert('请手动复制以上内容')
+    }
+    document.body.removeChild(ta)
   }
 
   function handleExport(format: 'txt' | 'docx' = 'txt') {
@@ -177,7 +203,7 @@ export default function ResultPage() {
           <span style={{ fontSize: 15, fontWeight: 600, color: '#1D1D1F', letterSpacing: '-0.02em' }}>民事上诉状</span>
           {streamDone && (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <button onClick={handleCopy} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: copied ? '#0071E3' : '#86868B', fontWeight: 500 }}>{copied ? '已复制' : '复制'}</button>
+              <button onClick={handleCopy} style={{ background: copied ? '#0071E3' : 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: copied ? '#FFF' : '#86868B', fontWeight: 500, padding: '6px 14px', borderRadius: 980, transition: 'all 0.2s ease' }}>{copied ? '✓ 已复制' : '复制'}</button>
               <div style={{ position: 'relative', display: 'inline-block' }}>
                 <button onClick={() => setIsExportMenu(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#86868B', fontWeight: 500, padding: '0 4px' }}>导出</button>
                 {isExportMenu && (
