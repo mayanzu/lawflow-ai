@@ -293,9 +293,9 @@ def _pdf_to_long_image(path, dpi=150):
             new = Image.new("RGB", (max_w, p.height), (255,255,255))
             new.paste(p, (0,0))
             resized.append(new)
+            p.close()
         else:
             resized.append(p)
-        p.close()
     pages = resized
     total_h = sum(p.height for p in pages)
     result = Image.new("RGB", (max_w, total_h), (255,255,255))
@@ -318,7 +318,7 @@ def _ocr_pdf(path):
     1. pdfplumber 提取文字（纯文本PDF秒级返回）
     2. 长图 -> 腾讯云 OCR 一次调用
     3. 腾讯云失败 -> RapidOCR 逐页兜底"""
-    import gc
+    import gc, fitz
 
     # Step 1: pdfplumber 先试
     try:
