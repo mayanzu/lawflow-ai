@@ -784,6 +784,34 @@ class Handler(ThreadedHandler):
             text_so_far = "".join(full_text)
             # 后处理清理
             cleaned = self._clean_appeal_text(text_so_far, info)
+
+            # 自我修复：校验发现 error 则重新生成（流式版本先输出草稿，最后再发最终版本）
+            for attempt in range(3):
+                validation = self._validate_appeal(cleaned, info)
+                if validation.get("overall") != "error":
+                    break
+                errors = [r for r in validation["results"] if r["status"] == "error"]
+                errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
+                print(f"[generate-stream] attempt {attempt+1} errors, regenerating...", flush=True)
+                retry_prompt = f'''上一次的诉状存在以下问题，请重新撰写并修复：
+{errors_text}
+
+案件信息：
+{json.dumps(info, ensure_ascii=False, indent=2)}
+
+要求：直接输出修复后的民事上诉状正文，从"民事上诉状"标题开始，到"委托代理人"结束。
+只输出正文，不要任何说明。'''
+                full_text = []
+                def on_retry(chunk):
+                    if stream_timed_out: return
+                    full_text.append(chunk)
+                    try:
+                        send_sse({"type": "chunk", "content": chunk})
+                    except Exception:
+                        pass
+                _call_ai_stream(retry_prompt, retries=2, callback=on_retry)
+                cleaned = self._clean_appeal_text("".join(full_text), info)
+
             legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", cleaned)
             legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
             send_sse({"type": "done", "appeal": cleaned, "legal_basis": legal_basis})
@@ -805,18 +833,9 @@ class Handler(ThreadedHandler):
         ocr_text = body.get("ocr_text", "")
         firm = "安徽国恒律师事务所"
         attorney = "赵光辉"
-        if ocr_text:
-            idx1 = ocr_text.find(firm)
-            idx2 = ocr_text.find(attorney)
-            start = max(idx1, idx2) - 200 if max(idx1, idx2) >= 0 else 0
-            if start < 0:
-                start = 0
-            context = ocr_text[start:start+300]
-            client_side = "上诉人（原审被告）" if "被告" in context or "被上诉人" not in context else "上诉人（原审原告）"
-        else:
-            client_side = "上诉人"
 
-        prompt = f'''你是安徽国恒律师事务所的资深诉讼律师{attorney}，专注民商事诉讼二十年。
+        def build_prompt():
+            return f'''你是安徽国恒律师事务所的资深诉讼律师{attorney}，专注民商事诉讼二十年。
 
 请根据以下判决书信息，撰写一份完整的、可直接提交人民法院的《民事上诉状》。
 
@@ -826,35 +845,47 @@ class Handler(ThreadedHandler):
 ## 判决书原文
 {ocr_text}
 
-## 写作要求（极其重要，违反任何一条都会导致文书报废）
-【禁止事项】
-❌ 禁止使用任何Markdown符号（** **、# 号、---等）
-❌ 禁止输出任何前言/说明/提示（如"这是一份..."、"使用提示"等）
-❌ 禁止输出任何后缀/总结/注释
-❌ 禁止使用emoji表情
-❌ 禁止使用占位符（如XXX、XX等），当事人名称、金额、日期必须与判决书完全一致
+## 写作要求
+禁止Markdown符号、前言说明、后缀注释、emoji、占位符（XXX、XX等）。
+当事人名称、金额、日期必须与判决书完全一致。
 
-【输出要求】
-✅ 直接输出民事上诉状正文，从标题"民事上诉状"开始，到附项结束
-✅ 标准法律文书格式，纯文本，不用任何标记符号
-✅ 当事人：上诉人为我方客户{firm}委托{attorney}律师代理
-✅ 上诉请求列明2-3项
-✅ 事实与理由部分至少分三点，每点含具体事实、法律依据（准确引用法律条文号和条文名称）、结论
-✅ 结尾格式：
-   此致
-   [上诉法院全称]
-   上诉人：[上诉人全称]
-   委托代理人：{firm} {attorney} 律师
-   判决日期之日起十五日内提交
+格式要求：
+1. 以"民事上诉状"标题开头
+2. 上诉人、被上诉人信息完整（当事人名称必须来自案件信息）
+3. 上诉请求列明2-3项，每项具体（如：撤销...改判...）
+4. 事实与理由至少分三点，每点含：具体事实 + 法律依据（引用具体条文） + 结论
+5. 结尾：此致 + 上诉法院全称 + 上诉人姓名 + 委托代理人：{firm} {attorney} 律师
+6. 全文纯文本，无任何标记符号
 
 只输出文书正文，多一个字都不要。'''
 
-        text = _call_ai(prompt, "你是文书写作AI。不要任何前言后语，直接输出民事上诉状正文纯文本，不含Markdown。")
-        
-        # 后处理：清理 AI 废话和 Markdown
-        text = self._clean_appeal_text(text, info)
-        
-        import re
+        def fix_prompt(errors_text):
+            return f'''上一次的诉状存在以下问题，请重新撰写并修复：
+
+{errors_text}
+
+案件信息：
+{json.dumps(info, ensure_ascii=False, indent=2)}
+
+要求：直接输出修复后的民事上诉状正文，从"民事上诉状"标题开始，到"委托代理人"结束。
+只输出正文，不要任何说明。'''
+
+        def do_generate():
+            text = _call_ai(build_prompt(), "你是文书写作AI。不要任何前言后语，直接输出民事上诉状正文纯文本，不含Markdown。")
+            return self._clean_appeal_text(text, info)
+
+        text = do_generate()
+
+        # 自我修复：校验发现 error 则重新生成
+        for attempt in range(3):
+            validation = self._validate_appeal(text, info)
+            if validation.get("overall") != "error":
+                break
+            errors = [r for r in validation["results"] if r["status"] == "error"]
+            errors_text = "\n".join(["- " + e["check"] + "：" + e["msg"] for e in errors])
+            print(f"[generate] attempt {attempt+1} had errors, regenerating: {errors_text[:200]}", flush=True)
+            text = do_generate()
+
         legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", text)
         legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
         return {"success": True, "appeal": text, "legal_basis": legal_basis}
