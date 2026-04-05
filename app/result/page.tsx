@@ -17,9 +17,12 @@ export default function ResultPage() {
   const [legalBasis, setLegalBasis] = useState<string[]>([])
   const [showBasis, setShowBasis] = useState(false)
   const streamEndRef = useRef<HTMLDivElement>(null)
+  const streamingStarted = useRef(false)
 
   useEffect(() => {
     const raw = localStorage.getItem('lw_appeal_text')
+    if (streamingStarted.current) return
+    streamingStarted.current = true
     if (raw) {
       setEditedText(raw)
       setStreamDone(true)
