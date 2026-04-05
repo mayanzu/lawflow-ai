@@ -389,6 +389,22 @@ def _ocr_pdf(path):
 _last_ai_call = 0.0
 _ai_call_lock = threading.Lock()
 
+# ===== 历史记录 =====
+HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "history.json")
+os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+
+def _load_history():
+    try:
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+def _save_history(history):
+    history = history[:20]  # 最多保留20条
+    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
 # ===== AI 调用 =====
 def _call_ai_stream(prompt, system="", retries=2, callback=None):
     from urllib.request import Request, urlopen
@@ -534,6 +550,14 @@ class Handler(ThreadedHandler):
                 return
             elif p == "/validate-appeal":
                 res = self._validate_appeal(body.get("appeal_text", ""), body.get("info", {}))
+            elif p == "/save-history":
+                res = self._save_history_entry(body)
+            elif p == "/get-history":
+                res = self._get_history_list()
+            elif p == "/delete-history":
+                res = self._delete_history_item(body)
+            elif p == "/clear-history":
+                res = self._clear_history()
             elif p == "/upload":
                 res = self._upload_json(body)
             else:
@@ -1038,6 +1062,35 @@ class Handler(ThreadedHandler):
         
         return text
 
+
+
+    def _save_history_entry(self, body):
+        history = _load_history()
+        entry = body.get("entry", {})
+        # 更新或新增
+        fid = entry.get("id", "")
+        existing = next((i for i, h in enumerate(history) if h.get("id") == fid), -1)
+        if existing >= 0:
+            history[existing] = {**history[existing], **entry}
+        else:
+            history.insert(0, entry)
+        _save_history(history)
+        return {"success": True}
+
+    def _get_history_list(self):
+        history = _load_history()
+        return {"success": True, "history": history}
+
+    def _delete_history_item(self, body):
+        history = _load_history()
+        fid = body.get("file_id", "")
+        history = [h for h in history if h.get("id") != fid]
+        _save_history(history)
+        return {"success": True}
+
+    def _clear_history(self):
+        _save_history([])
+        return {"success": True}
 
     def _validate_appeal(self, appeal_text, info):
         """校验上诉状格式，依据民诉法第165条、最高法院诉讼文书样式"""

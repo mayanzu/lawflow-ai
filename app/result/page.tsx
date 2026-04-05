@@ -119,7 +119,7 @@ export default function ResultPage() {
                   const hist = JSON.parse(localStorage.getItem('lw_history') || '[]')
                   const fid = localStorage.getItem('lw_file_id') || ''
                   const idx = hist.findIndex((h: any) => h.id === fid)
-                  if (idx >= 0) { hist[idx].appealText = finalText; localStorage.setItem('lw_history', JSON.stringify(hist)) }
+                  if (idx >= 0) { hist[idx].appealText = finalText; localStorage.setItem('lw_history', JSON.stringify(hist)); saveHistoryBackend(hist[idx]) }
                 } catch {}
                 if (data.legal_basis?.length > 0) {
                   setLegalBasis(data.legal_basis)
@@ -139,6 +139,15 @@ export default function ResultPage() {
     setIsGenerating(false)
   }
 
+
+  async function saveHistoryBackend(entry: any) {
+    try {
+      await fetch('http://163.7.1.176:3457/save-history', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entry })
+      })
+    } catch {}
+  }
 
   function handleCopy() {
     // 优先用 Clipboard API，fallback 用传统方法

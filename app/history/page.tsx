@@ -19,11 +19,28 @@ interface HistoryItem {
 export default function HistoryPage() {
   const router = useRouter()
   const [history, setHistory] = useState<HistoryItem[]>([])
+  const [isLoading, setIsLoading] = useState(true)
 
-  function loadHistory() {
-    const raw = localStorage.getItem('lw_history')
-    if (raw) { try { setHistory(JSON.parse(raw)) } catch { setHistory([]) } }
-    else setHistory([])
+  async function callApi(endpoint: string, body: any) {
+    try {
+      const res = await fetch('http://163.7.1.176:3457' + endpoint, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })
+      return res.json()
+    } catch { return null }
+  }
+
+  async function loadHistory() {
+    const res = await callApi('/get-history', {})
+    if (res?.success) {
+      setHistory(res.history || [])
+    } else {
+      const raw = localStorage.getItem('lw_history')
+      if (raw) { try { setHistory(JSON.parse(raw)) } catch { setHistory([]) } }
+      else setHistory([])
+    }
+    setIsLoading(false)
   }
 
   useEffect(() => { loadHistory() }, [])
@@ -32,11 +49,13 @@ export default function HistoryPage() {
     const updated = history.filter(h => h.id !== id)
     setHistory(updated)
     localStorage.setItem('lw_history', JSON.stringify(updated))
+    callApi('/delete-history', { file_id: id })
   }
 
   function handleClearAll() {
     setHistory([])
     localStorage.removeItem('lw_history')
+    callApi('/clear-history', {})
   }
 
   /* 查看结果：跳转到结果页显示已生成的诉状 */
@@ -96,7 +115,12 @@ export default function HistoryPage() {
           )}
         </div>
 
-        {history.length === 0 ? (
+        {isLoading ? (
+          <div style={{ textAlign: 'center', padding: '80px 20px' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #E0E0E0', borderTopColor: '#0071E3', margin: '0 auto 16px', animation: 'spin 0.8s linear infinite' }} />
+            <p style={{ fontSize: 14, color: '#86868B' }}>加载历史记录...</p>
+          </div>
+        ) : history.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '80px 20px' }}>
             <div style={{ width: 48, height: 48, borderRadius: '50%', border: '3px solid #E0E0E0', margin: '0 auto 16px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <svg width="24" height="24" viewBox="0 0 20 20" fill="none"><rect x="3" y="2" width="14" height="16" rx="2" stroke="#86868B" strokeWidth="1.5"/><line x1="7" y1="7" x2="13" y2="7" stroke="#86868B" strokeWidth="1.2"/><line x1="7" y1="10" x2="13" y2="10" stroke="#86868B" strokeWidth="1.2"/><line x1="7" y1="13" x2="10" y2="13" stroke="#86868B" strokeWidth="1.2"/></svg>
@@ -131,6 +155,7 @@ export default function HistoryPage() {
           </div>
         )}
       </main>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
