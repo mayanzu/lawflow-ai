@@ -598,7 +598,7 @@ class Handler(ThreadedHandler):
         txt = body.get("text", "")
         if not txt:
             return {"success": False, "error": "No text"}
-        text_chunk = txt[:7000]
+        text_chunk = txt  # 发送完整OCR文本，不截断
 
         REQUIRED_FIELDS = ["案号","案由","原告","被告","判决法院","判决日期","判决结果","上诉期限","上诉法院"]
 
