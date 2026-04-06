@@ -120,7 +120,7 @@ function FlowContent() {
   // eslint-disable-next-line
   }, [])
 
-  const allDone = stepStatus[2] === 'done'
+  const allDone = stepStatus[2] === 'done' || stepStatus[2] === 'active'
   const pad = mobile ? 16 : 32
 
   return (
