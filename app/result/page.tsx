@@ -1,16 +1,16 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { useRouter } from 'next/navigation'
+import { C, Nav, Card, Btn, Spinner, Icons } from '@/ui'
 
 const DOC_TYPES = [
-  { key: 'appeal', name: '民事上诉状', desc: '不服一审判决' },
-  { key: 'complaint', name: '民事起诉状', desc: '新案立案' },
-  { key: 'defense', name: '民事答辩状', desc: '被诉后答辩' },
-  { key: 'representation', name: '代理词', desc: '庭审总结' },
-  { key: 'execution', name: '执行申请书', desc: '申请强制执行' },
-  { key: 'preservation', name: '保全申请书', desc: '诉讼中保全' },
+  { key: 'appeal',         name: '民事上诉状',   desc: '不服一审判决' },
+  { key: 'complaint',      name: '民事起诉状',   desc: '新案立案' },
+  { key: 'defense',        name: '民事答辩状',   desc: '被诉后答辩' },
+  { key: 'representation', name: '代理词',       desc: '庭审总结' },
+  { key: 'execution',      name: '执行申请书',   desc: '申请强制执行' },
+  { key: 'preservation',   name: '保全申请书',   desc: '诉讼中保全' },
 ]
-
-import { useRouter } from 'next/navigation'
 
 export default function ResultPage() {
   const router = useRouter()
@@ -20,70 +20,42 @@ export default function ResultPage() {
   const [copied, setCopied] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [streamDone, setStreamDone] = useState(false)
-  const [docType, setDocType] = useState('appeal')
   const [isExportMenu, setIsExportMenu] = useState(false)
+  const [docType, setDocType] = useState('appeal')
+  const [infoFields, setInfoFields] = useState<Record<string, string>>({})
   const [legalBasis, setLegalBasis] = useState<string[]>([])
   const [showBasis, setShowBasis] = useState(false)
   const streamEndRef = useRef<HTMLDivElement>(null)
-  const streamingStarted = useRef(false)
 
-  // Read doc_type from localStorage
   useEffect(() => {
+    // Read saved info
+    const raw = localStorage.getItem('lw_analyze_info')
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw)
+        // Convert date for input
+        if (parsed.判决日期) {
+          const m = String(parsed.判决日期).match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
+          if (m) parsed.判决日期 = `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
+        }
+        setInfoFields(parsed)
+      } catch {}
+    }
+
+    // Read doc type
     const savedDoc = localStorage.getItem('lw_doc_type')
     if (savedDoc) setDocType(savedDoc)
-  }, [])
 
-  useEffect(() => {
-    const raw = localStorage.getItem('lw_appeal_text')
-    if (streamingStarted.current) return
-    streamingStarted.current = true
-    if (raw) {
-      setEditedText(raw)
+    // If result already exists, show it; otherwise start streaming
+    const existing = localStorage.getItem('lw_appeal_text')
+    if (existing) {
+      setEditedText(existing)
+      setStreamingText(existing)
       setStreamDone(true)
-    } else {
-      startStreaming(localStorage.getItem('lw_doc_type') || 'appeal')
+    } else if (raw) {
+      startStreaming(savedDoc || 'appeal')
     }
-    // Save history
-    const fileId = localStorage.getItem('lw_file_id') || ''
-    const fileName = localStorage.getItem('lw_file_name') || '未知文件'
-    const caseInfoRaw = localStorage.getItem('lw_analyze_info')
-    const ocrRaw = localStorage.getItem('lw_ocr_text') || ''
-    let caseNum = ''
-    if (ocrRaw) {
-      const m = ocrRaw.match(/([（(]\d{4}[）)][^\n]{2,10}民初|民终|民申|刑初|刑终|行初|行终)\d+号/)
-      if (m) caseNum = m[0].replace(/\s/g, '')
-    }
-    let caseInfo: any = {}
-    try { caseInfo = JSON.parse(caseInfoRaw || '{}') } catch {}
-    const entry: any = {
-      id: fileId || `manual_${Date.now()}`,
-      fileName,
-      uploadTime: new Date().toISOString(),
-      案号: caseInfo.案号 || caseNum || '未识别',
-      原告: caseInfo.原告 || '未知',
-      被告: caseInfo.被告 || '未知',
-      判决法院: caseInfo.判决法院 || '',
-      案由: caseInfo.案由 || '',
-      上诉法院: caseInfo.上诉法院 || '',
-      判决日期: caseInfo.判决日期 || '',
-      analyzeInfo: caseInfo,
-    }
-    try {
-      const historyRaw = localStorage.getItem('lw_history')
-      let history: any[] = []
-      try { history = JSON.parse(historyRaw || '[]') } catch {}
-      const existing = history.findIndex(h => h.id === entry.id)
-      // 合并更新数据，不覆盖已有的上诉文书
-      if (existing >= 0) {
-        history[existing] = { ...history[existing], ...entry }
-      } else {
-        history.unshift(entry)
-      }
-      history = history.slice(0, 20)
-      localStorage.setItem('lw_history', JSON.stringify(history))
-    } catch {}
-    const basisStr = localStorage.getItem('lw_legal_basis')
-    if (basisStr) { try { setLegalBasis(JSON.parse(basisStr)) } catch {} }
+  // eslint-disable-next-line
   }, [])
 
   useEffect(() => {
@@ -94,22 +66,19 @@ export default function ResultPage() {
 
   async function startStreaming(typeOverride?: string) {
     const type = typeOverride || docType
-    setIsGenerating(true)
-    setStreamDone(false)
-    setStreamingText('')
+    const savedDoc = localStorage.getItem('lw_doc_type')
+    setIsGenerating(true); setStreamDone(false); setStreamingText(''); setEditedText('')
     try {
-      const infoStr = localStorage.getItem('lw_analyze_info') || '{}'
       const ocrText = localStorage.getItem('lw_ocr_text') || ''
+      const info = JSON.parse(localStorage.getItem('lw_analyze_info') || '{}')
       const res = await fetch('/api/generate-appeal-stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ info: JSON.parse(infoStr), ocr_text: ocrText, doc_type: type }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ info, ocr_text: ocrText, doc_type: type }),
       })
       if (!res.ok) { setIsGenerating(false); return }
       const reader = res.body?.getReader()
       if (!reader) { setIsGenerating(false); return }
-      const decoder = new TextDecoder()
-      let buffer = ''
+      const decoder = new TextDecoder(); let buffer = ''
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -122,226 +91,181 @@ export default function ResultPage() {
           for (const line of eventData.split('\n')) {
             const trimmed = line.trim()
             if (!trimmed.startsWith('data:')) continue
-            const jsonStr = trimmed.slice(5).trim()
-            if (!jsonStr) continue
             try {
-              const data = JSON.parse(jsonStr)
-              if (data.type === 'chunk') {
-                setStreamingText(prev => prev + data.content)
-              } else if (data.type === 'done') {
+              const data = JSON.parse(trimmed.slice(5).trim())
+              if (data.type === 'chunk') setStreamingText(p => p + data.content)
+              else if (data.type === 'done') {
                 const finalText = (data.appeal || '').trim()
-                setEditedText(finalText)
-                setStreamingText(finalText)
+                setEditedText(finalText); setStreamingText(finalText)
                 localStorage.setItem('lw_appeal_text', finalText)
+                localStorage.setItem('lw_doc_type', type)
+                // Save to history
                 try {
                   const hist = JSON.parse(localStorage.getItem('lw_history') || '[]')
                   const fid = localStorage.getItem('lw_file_id') || ''
                   const idx = hist.findIndex((h: any) => h.id === fid)
-                  if (idx >= 0) { hist[idx].appealText = finalText; localStorage.setItem('lw_history', JSON.stringify(hist)); saveHistoryBackend(hist[idx]) }
+                  if (idx >= 0) { hist[idx].appealText = finalText; localStorage.setItem('lw_history', JSON.stringify(hist)) }
                 } catch {}
-                if (data.legal_basis?.length > 0) {
-                  setLegalBasis(data.legal_basis)
-                  localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis))
-                }
-                localStorage.setItem('lw_doc_type', type)
-                setStreamDone(true)
-                setIsGenerating(false)
-              } else if (data.type === 'error') {
-                setIsGenerating(false)
+                if (data.legal_basis?.length > 0) { setLegalBasis(data.legal_basis); localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis)) }
+                setStreamDone(true); setIsGenerating(false)
               }
-            } catch { /* skip bad SSE line */ }
+            } catch {}
           }
         }
       }
     } catch { setIsGenerating(false) }
-    setStreamDone(true)
-    setIsGenerating(false)
-  }
-
-
-  async function saveHistoryBackend(entry: any) {
-    try {
-      await fetch('http://163.7.1.176:3457/save-history', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entry })
-      })
-    } catch {}
+    setStreamDone(true); setIsGenerating(false)
   }
 
   function handleCopy() {
-    // 优先用 Clipboard API，fallback 用传统方法
-    if (navigator.clipboard && window.isSecureContext) {
-      navigator.clipboard.writeText(editedText).then(() => {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 2000)
-      }).catch(() => fallbackCopy())
-    } else {
-      fallbackCopy()
-    }
+    navigator.clipboard.writeText(editedText).then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
   }
 
-  function fallbackCopy() {
-    const ta = document.createElement('textarea')
-    ta.value = editedText
-    ta.style.position = 'fixed'
-    ta.style.left = '-9999px'
-    document.body.appendChild(ta)
-    ta.select()
-    try {
-      document.execCommand('copy')
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch (e) {
-      // 最终 fallback：alert 提示
-      alert('请手动复制以上内容')
-    }
-    document.body.removeChild(ta)
-  }
-
-  function handleExport(format: 'txt' | 'docx' = 'txt') {
+  function handleExport(format: 'txt' | 'docx') {
     if (format === 'docx') {
       const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:SimSun,serif;font-size:14pt;line-height:2;padding:1.5cm;text-align:justify;}</style></head><body><p style="text-align:center;font-size:18pt;font-weight:bold;letter-spacing:6pt;margin-bottom:30px;">民事上诉状</p>${editedText.replace(/\n/g, '<br>')}</body></html>`
       const blob = new Blob(['\ufeff' + html], { type: 'application/msword' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = '民事上诉状.doc'; a.click()
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = '民事上诉状.doc'; a.click()
       URL.revokeObjectURL(url)
     } else {
       const blob = new Blob([editedText], { type: 'text/plain;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a'); a.href = url; a.download = '民事上诉状.txt'; a.click()
+      const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `${DOC_TYPES.find(d=>d.key===docType)?.name || '文书'}.txt`; a.click()
       URL.revokeObjectURL(url)
     }
   }
 
-
-  function handleRegenerate() {
-    if (!confirm('重新生成将清空当前内容，确定继续？')) return
-    Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k))
-    router.push('/')
-  }
-
+  const isUrgent = false
   const displayText = editedText || streamingText
 
   return (
-    <div style={{ minHeight: '100vh', background: '#FFFFFF', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif' }}>
-      {/* 导航栏 */}
-      <nav style={{ backdropFilter: 'saturate(180%) blur(20px)', WebkitBackdropFilter: 'saturate(180%) blur(20px)', background: 'rgba(255,255,255,0.85)', borderBottom: '1px solid rgba(0,0,0,0.08)', position: 'sticky', top: 0, zIndex: 100 }}>
-        <div style={{ maxWidth: 980, margin: '0 auto', padding: '0 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', height: 52 }}>
-          <button onClick={() => router.push('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#0071E3', fontWeight: 500 }}>返回首页</button>
-          <span style={{ fontSize: 15, fontWeight: 600, color: '#1D1D1F', letterSpacing: '-0.02em' }}>民事上诉状</span>
-          {streamDone && (
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <button onClick={handleCopy} style={{ background: copied ? '#0071E3' : 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: copied ? '#FFF' : '#86868B', fontWeight: 500, padding: '6px 14px', borderRadius: 980, transition: 'all 0.2s ease' }}>{copied ? '✓ 已复制' : '复制'}</button>
-              <div style={{ position: 'relative', display: 'inline-block' }}>
-                <button onClick={() => setIsExportMenu(v => !v)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#86868B', fontWeight: 500, padding: '0 4px' }}>导出</button>
-                {isExportMenu && (
-                  <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 4, background: '#FFF', borderRadius: 10, boxShadow: '0 4px 16px rgba(0,0,0,0.12)', border: '1px solid #E8E8ED', overflow: 'hidden', zIndex: 10, minWidth: 120 }}>
-                    <button onClick={() => { handleExport('txt'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#1D1D1F', textAlign: 'left', borderBottom: '1px solid #F0F0F0' }}>TXT 文本</button>
-                    <button onClick={() => { handleExport('docx'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: '#1D1D1F', textAlign: 'left' }}>DOC Word</button>
-                  </div>
-                )}
+    <div style={{ minHeight: '100vh', background: C.bg }}>
+      <Nav
+        title={DOC_TYPES.find(d => d.key === docType)?.name || '生成结果'}
+        left={
+          <button onClick={() => router.push('/')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.blue, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.9rem', fontWeight: 500 }}>
+            {Icons.arrowLeft(16, C.blue)} 返回首页
+          </button>
+        }
+        right={
+          <button onClick={() => router.push('/history')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.blue, fontSize: '0.9rem', fontWeight: 500 }}>历史</button>
+        }
+      />
+
+      <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px 80px' }}>
+        {/* 信息卡片（可编辑） */}
+        {Object.keys(infoFields).length > 0 && (
+          <Card padding={24} style={{ marginBottom: 24 }}>
+            <details style={{ cursor: 'pointer' }}>
+              <summary style={{ fontSize: '0.75rem', fontWeight: 600, color: C.muted, letterSpacing: '0.06em', textTransform: 'uppercase' }}>案件信息（点击展开编辑）</summary>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 16 }}>
+                {(['案号', '案由', '原告', '被告', '判决法院', '判决日期', '上诉期限', '上诉法院'] as const).map(k => (
+                  <label key={k}>
+                    <div style={{ fontSize: '0.7rem', fontWeight: 600, color: C.muted, marginBottom: 4 }}>{k}</div>
+                    <input type={k === '判决日期' ? 'date' : 'text'} value={infoFields[k] || ''}
+                      onChange={e => { const u = { ...infoFields, [k]: e.target.value }; setInfoFields(u); localStorage.setItem('lw_analyze_info', JSON.stringify(u)) }}
+                      style={{ width: '100%', padding: '8px 10px', border: `1px solid ${C.border}`, borderRadius: 8, fontSize: '0.85rem', color: C.text, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', background: '#FFF' }} />
+                  </label>
+                ))}
               </div>
-            </div>
-          )}
-        </div>
-      </nav>
+              <Btn variant="secondary" onClick={() => startStreaming()} style={{ marginTop: 16, width: '100%', fontSize: '0.85rem' }} disabled={isGenerating}>
+                {isGenerating ? '正在重新生成...' : '按当前信息重新生成'}
+              </Btn>
+            </details>
+          </Card>
+        )}
 
-      {/* 主内容 */}
-      <main style={{ maxWidth: 720, margin: '0 auto', padding: '40px 24px 80px' }}>
+        {/* 生成中 */}
         {isGenerating && !streamDone && (
-          <div style={{ textAlign: 'center', marginBottom: 40 }}>
-            <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid #F0F0F0', borderTopColor: '#0071E3', animation: 'spin 0.8s linear infinite', margin: '0 auto 16px' }} />
-            <p style={{ fontSize: 15, color: '#86868B' }}>AI 正在撰写法律文书...</p>
-          </div>
+          <Card padding={48} style={{ textAlign: 'center', marginBottom: 24 }}>
+            <Spinner size={40} />
+            <p style={{ fontSize: '1rem', fontWeight: 500, color: C.sub, marginTop: 20, marginBottom: 4 }}>
+              AI 正在撰写{DOC_TYPES.find(d => d.key === docType)?.name}...
+            </p>
+            <p style={{ fontSize: '0.8rem', color: C.muted }}>请稍候，这可能需要 15-60 秒</p>
+          </Card>
         )}
 
-        {streamDone && !isEditing && (
-          <div style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <p style={{ fontSize: 12, color: '#86868B', margin: 0 }}>{editedText.length.toLocaleString()} 字</p>
-            </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button onClick={() => setIsEditing(true)} style={{ padding: '10px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 980, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>编辑</button>
-              <button onClick={handleRegenerate} style={{ padding: '10px 20px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 980, cursor: 'pointer', fontSize: 14, fontWeight: 500 }}>新建任务</button>
-            </div>
-          </div>
-        )}
-
-        {/* 诉状内容 */}
+        {/* 结果 */}
         {displayText && (
-          <div style={{ background: '#F8F9FA', borderRadius: 16, overflow: 'hidden' }}>
+          <Card padding={32} style={{ marginBottom: 24, minHeight: 300 }} hover={false}>
             {isEditing ? (
-              <textarea
-                value={editedText}
-                onChange={e => setEditedText(e.target.value)}
-                style={{ width: '100%', minHeight: '500px', border: 'none', padding: '24px', fontSize: 15, lineHeight: 2, color: '#1D1D1F', fontFamily: 'inherit', outline: 'none', resize: 'vertical', boxSizing: 'border-box', background: '#FFF' }}
-              />
+              <textarea value={editedText} onChange={e => setEditedText(e.target.value)}
+                style={{ width: '100%', minHeight: '500px', border: `1px solid ${C.border}`, padding: 20, fontSize: '0.95rem', lineHeight: '2.2', color: C.text, outline: 'none', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box', background: '#FFF', borderRadius: 12 }} />
             ) : (
-              <div style={{ padding: '28px 24px', fontSize: 15, lineHeight: 2, color: '#1D1D1F', whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#FFF' }}>
+              <div style={{ padding: '28px 24px', fontSize: '0.95rem', lineHeight: '2.2', color: C.text, whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#FFF', borderRadius: 12 }}>
                 {displayText}
-                {isGenerating && <span style={{ display: 'inline-block', width: 2, height: 16, background: '#0071E3', marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />}
+                {isGenerating && <span style={{ display: 'inline-block', width: 2, height: 16, background: C.blue, marginLeft: 2, verticalAlign: 'middle', animation: 'blink 1s step-end infinite' }} />}
                 <div ref={streamEndRef} />
               </div>
             )}
-          </div>
+          </Card>
         )}
 
         {isEditing && (
-          <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
-            <button onClick={() => { setIsEditing(false); localStorage.setItem('lw_appeal_text', editedText) }} style={{ flex: 2, padding: '14px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>保存</button>
-            <button onClick={() => setIsEditing(false)} style={{ flex: 1, padding: '14px 20px', background: '#FFF', color: '#1D1D1F', border: '1px solid #E0E0E0', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500 }}>取消</button>
+          <div style={{ marginBottom: 24, display: 'flex', gap: 12 }}>
+            <Btn variant="primary" onClick={() => { setIsEditing(false); localStorage.setItem('lw_appeal_text', editedText) }} style={{ flex: 2 }}>保存</Btn>
+            <Btn variant="secondary" onClick={() => setIsEditing(false)}>取消</Btn>
           </div>
         )}
 
-        {/* 校验结果 */}
-        {/* 法律依据 */}
-        {legalBasis.length > 0 && (
-          <div style={{ marginTop: 32 }}>
-            <div style={{ cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }} onClick={() => setShowBasis(!showBasis)}>
-              <h3 style={{ fontSize: 14, fontWeight: 600, color: '#1D1D1F', margin: 0 }}>引用法律条文</h3>
-              <span style={{ fontSize: 13, color: '#86868B' }}>{showBasis ? '收起' : '展开'}</span>
-            </div>
-            {showBasis && (
-              <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {legalBasis.map((article, i) => (
-                  <div key={i} style={{ padding: '10px 14px', background: '#F8F9FA', borderRadius: 10, fontSize: 13, color: '#1D1D1F', lineHeight: 1.6 }}>{article}</div>
-                ))}
+        {/* 操作栏 */}
+        {streamDone && !isGenerating && displayText && (
+          <Card padding={24} style={{ marginBottom: 24 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <span style={{ fontSize: '0.8rem', color: C.muted }}>{editedText.length.toLocaleString()} 字</span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Btn variant="ghost" onClick={handleCopy} style={{ padding: '8px 16px', fontSize: '0.85rem' }}>
+                  {copied ? '已复制' : '复制'}
+                </Btn>
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <Btn variant="ghost" onClick={() => setIsExportMenu(v => !v)} style={{ padding: '8px 16px', fontSize: '0.85rem' }}>导出</Btn>
+                  {isExportMenu && (
+                    <div style={{ position: 'absolute', top: '100%', right: 0, marginTop: 8, background: C.white, borderRadius: 12, boxShadow: '0 8px 30px rgba(0,0,0,0.12)', border: `1px solid ${C.border}`, overflow: 'hidden', zIndex: 10, minWidth: 140 }}>
+                      <button onClick={() => { handleExport('txt'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '12px 16px', background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`, cursor: 'pointer', fontSize: '0.9rem', color: C.text, textAlign: 'left' }}>TXT 文本</button>
+                      <button onClick={() => { handleExport('docx'); setIsExportMenu(false) }} style={{ display: 'block', width: '100%', padding: '12px 16px', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.9rem', color: C.text, textAlign: 'left' }}>DOC Word</button>
+                    </div>
+                  )}
+                </div>
+                <Btn variant="ghost" onClick={() => setIsEditing(true)} style={{ padding: '8px 16px', fontSize: '0.85rem' }}>编辑</Btn>
               </div>
+            </div>
+
+            {/* 法律依据 */}
+            {legalBasis.length > 0 && (
+              <details>
+                <summary style={{ cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, color: C.muted, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 12 }}>引用法律条文 ({legalBasis.length})</summary>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+                  {legalBasis.map((a, i) => (
+                    <div key={i} style={{ padding: '10px 14px', background: C.bg, borderRadius: 10, fontSize: '0.85rem', color: C.text, lineHeight: 1.6 }}>{a}</div>
+                  ))}
+                </div>
+              </details>
             )}
-          </div>
+          </Card>
         )}
 
-        {/* 底部操作 */}
+        {/* 切换其他文书 */}
         {streamDone && !isGenerating && (
-          <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #F0F0F0' }}>
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', marginBottom: 12 }}>生成其他文书</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
-              {[
-                { key: 'appeal', name: '民事上诉状', desc: '不服一审判决' },
-                { key: 'complaint', name: '民事起诉状', desc: '新案立案' },
-                { key: 'defense', name: '民事答辩状', desc: '被诉后答辩' },
-                { key: 'representation', name: '代理词', desc: '庭审总结' },
-                { key: 'execution', name: '执行申请书', desc: '申请强制执行' },
-                { key: 'preservation', name: '保全申请书', desc: '诉讼中保全' },
-              ].filter(d => d.key !== docType).map(d => (
-                <button key={d.key} onClick={() => { setDocType(d.key); startStreaming(d.key) }} style={{ padding: '10px 12px', background: '#F8F9FA', color: '#1D1D1F', border: '1px solid #E0E0E0', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 500, textAlign: 'left' }}>
-                  <div>{d.name}</div>
-                  <div style={{ fontSize: 11, color: '#86868B', fontWeight: 400 }}>{d.desc}</div>
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: C.muted, letterSpacing: '0.08em', marginBottom: 16, textTransform: 'uppercase' }}>生成其他文书</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {DOC_TYPES.filter(d => d.key !== docType).map(d => (
+                <button key={d.key} onClick={() => { setDocType(d.key); startStreaming(d.key) }} style={{
+                  padding: '16px 18px', background: C.white, border: `1px solid ${C.border}`, borderRadius: 14,
+                  cursor: 'pointer', transition: 'all 0.2s ease', textAlign: 'left',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = C.blue; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 16px rgba(0,113,227,0.08)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.borderColor = C.border; (e.currentTarget as HTMLButtonElement).style.boxShadow = 'none' }}>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 600, color: C.text }}>{d.name}</div>
+                  <div style={{ fontSize: '0.75rem', color: C.muted, marginTop: 2 }}>{d.desc}</div>
                 </button>
               ))}
-            </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button onClick={() => router.push('/')} style={{ flex: 1, padding: '14px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>新建任务</button>
-              <button onClick={() => router.push('/history')} style={{ flex: 1, padding: '14px 20px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500 }}>查看历史</button>
             </div>
           </div>
         )}
       </main>
 
-      <style>{`
-        @keyframes spin { to { transform: rotate(360deg); } }
-        @keyframes blink { 50% { opacity: 0; } }
-      `}</style>
+      <style>{`@keyframes blink { 50% { opacity: 0; } } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }
