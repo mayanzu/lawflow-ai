@@ -1,0 +1,19 @@
+{
+  "doc_type": "representation",
+  "display_name": "代理词",
+  "description": "庭审总结时使用",
+  "system_prompt": "你是{law_firm}的资深诉讼律师{attorney}，专注民商事诉讼{years}年。你的任务是撰写一份专业的《{doc_name}》。",
+  "user_template": "请根据以下信息撰写{doc_name}。\n\n## 案件信息\n{info}\n\n## 庭审背景\n{ocr_text}\n\n## 格式要求\n{format_rules}\n\n禁止：{prohibited_items}\n\n只输出文书正文，不要任何说明文字。",
+  "format_rules": [
+    "标题必须为'{doc_name}'（单独一行）",
+    "开头写明委托事项和代理身份",
+    "争议焦点+法律分析（引用具体条文）",
+    "结尾：总结意见+代理人+日期"
+  ],
+  "prohibited_items": [
+    "禁止Markdown符号",
+    "禁止前言/后缀",
+    "禁止emoji",
+    "禁止占位符"
+  ]
+}

@@ -1,5 +1,15 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+
+const DOC_TYPES = [
+  { key: 'appeal', name: '民事上诉状', desc: '不服一审判决' },
+  { key: 'complaint', name: '民事起诉状', desc: '新案立案' },
+  { key: 'defense', name: '民事答辩状', desc: '被诉后答辩' },
+  { key: 'representation', name: '代理词', desc: '庭审总结' },
+  { key: 'execution', name: '执行申请书', desc: '申请强制执行' },
+  { key: 'preservation', name: '保全申请书', desc: '诉讼中保全' },
+]
+
 import { useRouter } from 'next/navigation'
 
 export default function ResultPage() {
@@ -10,11 +20,18 @@ export default function ResultPage() {
   const [copied, setCopied] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [streamDone, setStreamDone] = useState(false)
+  const [docType, setDocType] = useState('appeal')
   const [isExportMenu, setIsExportMenu] = useState(false)
   const [legalBasis, setLegalBasis] = useState<string[]>([])
   const [showBasis, setShowBasis] = useState(false)
   const streamEndRef = useRef<HTMLDivElement>(null)
   const streamingStarted = useRef(false)
+
+  // Read doc_type from localStorage
+  useEffect(() => {
+    const savedDoc = localStorage.getItem('lw_doc_type')
+    if (savedDoc) setDocType(savedDoc)
+  }, [])
 
   useEffect(() => {
     const raw = localStorage.getItem('lw_appeal_text')
@@ -24,7 +41,7 @@ export default function ResultPage() {
       setEditedText(raw)
       setStreamDone(true)
     } else {
-      startStreaming()
+      startStreaming(localStorage.getItem('lw_doc_type') || 'appeal')
     }
     // Save history
     const fileId = localStorage.getItem('lw_file_id') || ''
@@ -75,7 +92,8 @@ export default function ResultPage() {
     }
   }, [streamingText, isGenerating])
 
-  async function startStreaming() {
+  async function startStreaming(typeOverride?: string) {
+    const type = typeOverride || docType
     setIsGenerating(true)
     setStreamDone(false)
     setStreamingText('')
@@ -85,7 +103,7 @@ export default function ResultPage() {
       const res = await fetch('/api/generate-appeal-stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ info: JSON.parse(infoStr), ocr_text: ocrText }),
+        body: JSON.stringify({ info: JSON.parse(infoStr), ocr_text: ocrText, doc_type: type }),
       })
       if (!res.ok) { setIsGenerating(false); return }
       const reader = res.body?.getReader()
@@ -125,6 +143,7 @@ export default function ResultPage() {
                   setLegalBasis(data.legal_basis)
                   localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis))
                 }
+                localStorage.setItem('lw_doc_type', type)
                 setStreamDone(true)
                 setIsGenerating(false)
               } else if (data.type === 'error') {
@@ -294,9 +313,27 @@ export default function ResultPage() {
 
         {/* 底部操作 */}
         {streamDone && !isGenerating && (
-          <div style={{ marginTop: 40, display: 'flex', gap: 12 }}>
-            <button onClick={() => router.push('/')} style={{ flex: 1, padding: '14px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>新建任务</button>
-            <button onClick={() => router.push('/history')} style={{ flex: 1, padding: '14px 20px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500 }}>查看历史</button>
+          <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid #F0F0F0' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', marginBottom: 12 }}>生成其他文书</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+              {[
+                { key: 'appeal', name: '民事上诉状', desc: '不服一审判决' },
+                { key: 'complaint', name: '民事起诉状', desc: '新案立案' },
+                { key: 'defense', name: '民事答辩状', desc: '被诉后答辩' },
+                { key: 'representation', name: '代理词', desc: '庭审总结' },
+                { key: 'execution', name: '执行申请书', desc: '申请强制执行' },
+                { key: 'preservation', name: '保全申请书', desc: '诉讼中保全' },
+              ].filter(d => d.key !== docType).map(d => (
+                <button key={d.key} onClick={() => { setDocType(d.key); startStreaming(d.key) }} style={{ padding: '10px 12px', background: '#F8F9FA', color: '#1D1D1F', border: '1px solid #E0E0E0', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 500, textAlign: 'left' }}>
+                  <div>{d.name}</div>
+                  <div style={{ fontSize: 11, color: '#86868B', fontWeight: 400 }}>{d.desc}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => router.push('/')} style={{ flex: 1, padding: '14px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>新建任务</button>
+              <button onClick={() => router.push('/history')} style={{ flex: 1, padding: '14px 20px', background: '#FFF', color: '#0071E3', border: '1px solid #0071E3', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500 }}>查看历史</button>
+            </div>
           </div>
         )}
       </main>

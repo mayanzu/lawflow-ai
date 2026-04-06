@@ -12,6 +12,15 @@ interface Step {
   message: string
 }
 
+const DOC_TYPES = [
+  { key: 'appeal', name: '民事上诉状', desc: '不服一审判决' },
+  { key: 'complaint', name: '民事起诉状', desc: '新案立案' },
+  { key: 'defense', name: '民事答辩状', desc: '被诉后答辩' },
+  { key: 'representation', name: '代理词', desc: '庭审总结' },
+  { key: 'execution', name: '执行申请书', desc: '申请强制执行' },
+  { key: 'preservation', name: '保全申请书', desc: '诉讼中保全' },
+]
+
 const STEPS = [
   { id: 'upload', title: '上传' },
   { id: 'ocr', title: 'OCR 识别' },
@@ -102,6 +111,7 @@ function FlowContent() {
           setStepStatus(2, 'done', 100, '完成')
         }
         setAnalyzeInfo(analyzeRes.info)
+        setInfoFields({ ...analyzeRes.info })
         setInfoFields({
           ...analyzeRes.info,
           判决日期: toDateInputVal(analyzeRes.info.判决日期)
@@ -127,7 +137,9 @@ function FlowContent() {
     return ''
   }
 
-  function handleGoToConfirm() {
+  function handleGoToConfirm(docType: string) {
+    localStorage.setItem('lw_doc_type', docType)
+    localStorage.setItem('lw_analyze_info', JSON.stringify(infoFields))
     router.push('/result')
   }
 
@@ -270,11 +282,27 @@ function FlowContent() {
           </div>
         )}
 
-        {/* 完成后的操作按钮 */}
+        {/* 文书类型选择 */}
+        {isDone && !error && (
+          <div style={{ marginBottom: 32 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#86868B', letterSpacing: '0.06em', marginBottom: 16 }}>选择要生成的文书</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {DOC_TYPES.map(doc => (
+                <div key={doc.key} onClick={() => handleGoToConfirm(doc.key)} style={{ background: '#F8F9FA', borderRadius: 12, padding: '18px 20px', cursor: 'pointer', border: '1px solid #E0E0E0', transition: 'all 0.2s ease' }}
+                     onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.borderColor = '#0071E3'; (e.currentTarget as HTMLDivElement).style.background = '#F0F4FF' }}
+                     onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.borderColor = '#E0E0E0'; (e.currentTarget as HTMLDivElement).style.background = '#F8F9FA' }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#1D1D1F', marginBottom: 4 }}>{doc.name}</div>
+                  <div style={{ fontSize: 12, color: '#86868B' }}>{doc.desc}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 操作按钮 */}
         {isDone && !error && (
           <div style={{ display: 'flex', gap: 12 }}>
             <button onClick={() => router.push('/')} style={{ flex: 1, padding: '14px 20px', background: '#FFF', color: '#1D1D1F', border: '1px solid #E0E0E0', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 500 }}>上传新文件</button>
-            <button onClick={handleGoToConfirm} style={{ flex: 2, padding: '14px 20px', background: '#0071E3', color: '#FFF', border: 'none', borderRadius: 12, cursor: 'pointer', fontSize: 15, fontWeight: 600 }}>确认信息并继续</button>
           </div>
         )}
       </main>

@@ -1,0 +1,20 @@
+{
+  "doc_type": "appeal",
+  "display_name": "民事上诉状",
+  "description": "不服一审判决时使用",
+  "system_prompt": "你是{law_firm}的资深诉讼律师{attorney}，专注民商事诉讼{years}年。你的任务是撰写一份完整的、可直接提交人民法院的《{doc_name}》。",
+  "user_template": "请根据以下信息撰写{doc_name}。\n\n## 案件信息\n{info}\n\n## 判决书原文\n{ocr_text}\n\n## 格式要求\n{format_rules}\n\n禁止：{prohibited_items}\n\n只输出文书正文，不要任何说明文字。",
+  "format_rules": [
+    "标题必须为'{doc_name}'（单独一行）",
+    "必须列明上诉人、被上诉人基本信息",
+    "上诉请求：必须具体、量化",
+    "事实与理由：至少分两点展开",
+    "结尾：此致+二审法院+上诉人+日期+委托代理人"
+  ],
+  "prohibited_items": [
+    "禁止Markdown符号",
+    "禁止前言/后缀",
+    "禁止emoji",
+    "禁止占位符"
+  ]
+}

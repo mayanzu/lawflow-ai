@@ -405,6 +405,45 @@ def _save_history(history):
     with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
+# ===== Prompt 模板引擎 =====
+PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prompts")
+
+def _load_prompt_template(doc_type):
+    prompt_file = os.path.join(PROMPTS_DIR, doc_type + ".json")
+    try:
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
+
+def _build_prompt(doc_type, info, ocr_text=""):
+    template = _load_prompt_template(doc_type)
+    if not template:
+        return "", ""
+    sys_vars = {"law_firm": "安徽国恒律师事务所", "attorney": "赵光辉", "years": "20", "doc_name": template.get("display_name", "")}
+    system = template["system_prompt"]
+    for k, v in sys_vars.items():
+        system = system.replace("{" + k + "}", v)
+    user = template["user_template"]
+    rules = "\n".join(["- " + r for r in template.get("format_rules", [])])
+    prohibited = "\n".join(["- " + p for p in template.get("prohibited_items", [])])
+    user = user.replace("{info}", json.dumps(info, ensure_ascii=False, indent=2))
+    user = user.replace("{ocr_text}", ocr_text)
+    user = user.replace("{extra_fields}", "")
+    user = user.replace("{doc_name}", template.get("display_name", ""))
+    user = user.replace("{format_rules}", rules)
+    user = user.replace("{prohibited_items}", prohibited)
+    return system, user
+
+DOC_TYPES = {
+    "appeal":         {"name": "民事上诉状",   "desc": "不服一审判决时使用"},
+    "complaint":      {"name": "民事起诉状",   "desc": "新案立案时使用"},
+    "defense":        {"name": "民事答辩状",   "desc": "被诉后答辩时使用"},
+    "representation": {"name": "代理词",       "desc": "庭审总结时使用"},
+    "execution":      {"name": "执行申请书",   "desc": "判决后申请强制执行时使用"},
+    "preservation":   {"name": "保全申请书",   "desc": "诉讼前/中申请财产保全时使用"},
+}
+
 # ===== AI 调用 =====
 def _call_ai_stream(prompt, system="", retries=2, callback=None):
     from urllib.request import Request, urlopen
@@ -550,10 +589,24 @@ class Handler(ThreadedHandler):
                 return
             elif p == "/validate-appeal":
                 res = self._validate_appeal(body.get("appeal_text", ""), body.get("info", {}))
+            elif p == "/generate-doc-stream":
+                self._generate_doc_stream(body)
+                return
+            elif p == "/get-doc-types":
+                res = {"success": True, "types": [{"key": k, "name": v["name"], "desc": v["desc"]} for k, v in DOC_TYPES.items()]}
+            elif p == "/generate-appeal-stream":
+                body["doc_type"] = "appeal"
+                self._generate_doc_stream(body)
+                return
+            elif p == "/generate-stream":
+                self._generate_stream(body)
+                return
             elif p == "/save-history":
                 res = self._save_history_entry(body)
             elif p == "/get-history":
                 res = self._get_history_list()
+            elif p == "/get-document":
+                res = self._get_document(body)
             elif p == "/delete-history":
                 res = self._delete_history_item(body)
             elif p == "/clear-history":
@@ -846,7 +899,7 @@ class Handler(ThreadedHandler):
 
             text_so_far = "".join(full_text)
             # 后处理清理
-            cleaned = self._clean_appeal_text(text_so_far, info)
+            cleaned = self._clean_appeal_text(text_so_far, info, doc_type)
 
             # 校验（流式不重试，避免客户端重复显示内容——最终兜底会替换占位符）
             # 最终兜底：替换残留占位符
@@ -862,6 +915,94 @@ class Handler(ThreadedHandler):
             legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", cleaned)
             legal_basis = [f"《{m[0]}》第{m[1]}条" for m in legal_articles[:8]]
             send_sse({"type": "done", "appeal": cleaned, "legal_basis": legal_basis})
+
+        except Exception as e:
+            try:
+                send_sse({"type": "error", "error": str(e)})
+            except Exception:
+                pass
+        finally:
+            try:
+                self.wfile.close()
+            except Exception:
+                pass
+
+
+    def _generate_doc_stream(self, body):
+        import re, threading
+        doc_type = body.get("doc_type", "appeal")
+        if doc_type not in DOC_TYPES:
+            doc_type = "appeal"
+        info = body.get("info", {})
+        ocr_text = body.get("ocr_text", "")
+        system, user = _build_prompt(doc_type, info, ocr_text)
+        if not user:
+            self.send_response(400)
+            self.end_headers()
+            self.wfile.write(json.dumps({"success": False, "error": "文书类型未找到"}, ensure_ascii=False).encode())
+            return
+
+        stream_done = threading.Event()
+        stream_timed_out = False
+
+        prompt = user
+
+        def send_sse(data_dict):
+            try:
+                self.wfile.write(("data: " + json.dumps(data_dict, ensure_ascii=False) + "\n\n").encode())
+                self.wfile.flush()
+            except BrokenPipeError:
+                raise Exception("客户端已断开连接")
+            except Exception as e:
+                print(f"[SSE send error] {e}", flush=True, file=sys.stderr)
+
+        def on_chunk(chunk):
+            if stream_timed_out:
+                return
+            full_text.append(chunk)
+            try:
+                send_sse({"type": "chunk", "content": chunk})
+            except Exception:
+                pass
+
+        full_text = []
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            def stream_task():
+                try:
+                    _call_ai_stream(system + "\n\n" + prompt, "", retries=2, callback=on_chunk)
+                finally:
+                    stream_done.set()
+
+            t = threading.Thread(target=stream_task)
+            t.daemon = True
+            t.start()
+            if not stream_done.wait(120):
+                stream_timed_out = True
+                send_sse({"type": "error", "error": "生成超时（120秒）"})
+                return
+
+            text_so_far = "".join(full_text)
+            cleaned = self._clean_appeal_text(text_so_far, info)
+
+            # Final fallback: replace placeholders
+            _p = info.get("原告") or info.get("上诉人") or "（信息不详）"
+            _d = info.get("被告") or info.get("被上诉人") or "（信息不详）"
+            for _old, _new in [("XXX", _p), ("XX", _d), ("[上诉人]", _p), ("[被上诉人]", _d), ("[姓名]", _p)]:
+                if _old in cleaned:
+                    cleaned = cleaned.replace(_old, _new)
+            cleaned = re.sub(r"\[.*?\]", "（信息不详）", cleaned)
+            cleaned = re.sub(r"X{2,}", _p, cleaned)
+
+            legal_articles = re.findall(r"《([^《]+)》第?(\d+)[条款项]", cleaned)
+            legal_basis = ["《" + m[0] + "》第" + m[1] + "条" for m in legal_articles[:8]]
+            send_sse({"type": "done", "appeal": cleaned, "legal_basis": legal_basis, "doc_type": doc_type})
 
         except Exception as e:
             try:
@@ -1000,28 +1141,38 @@ class Handler(ThreadedHandler):
         return {"success": True, "appeal": text, "legal_basis": legal_basis}
     
     def _clean_appeal_text(self, text, info):
-        """清理 AI 输出的废话和 Markdown 符号"""
+        """清理 AI 输出的废话和 Markdown 符号（适用于所有文书类型）"""
         import re
         
-        # 1. 删除开头的废话（AI 常见的"这是一份..."开头）
-        # 找到真正的开头（以 民事上诉状 开头）
-        title_match = re.search(r'[#= ]*民事上诉状[#= ]*\n', text)
-        if title_match:
-            text = text[title_match.start():]
+        # 1. 删除开头的废话
+        # 找到真正的文书标题
+        TITLE_KW = ['民事上诉状', '民事起诉状', '民事答辩状', '代理词', '执行申请书', '保全申请书']
+        # 找第一个出现的文书标题
+        best_pos = len(text)
+        best_title = ''
+        for t in TITLE_KW:
+            p = text.find(t)
+            if 0 <= p < best_pos:
+                best_pos = p
+                best_title = t
         
-        # 2. 截断到结尾（删除 AI 的"使用提示"等后缀）
+        if best_pos < 200 and best_pos > 0:
+            # 标题前有内容（如案号），把标题提到最前面独立成行
+            text = best_title + '\n' + text[best_pos + len(best_title):]
+        elif best_pos == 0:
+            # 标题在开头，保留
+            pass
+        
+        # 2. 截断到结尾
         stop_kwds = ['使用提示', '注意事项', '温馨提示', '注：', '📝', '💡', '请根据', '📄']
         stop_pos = len(text)
         for kw in stop_kwds:
             pos = text.find(kw)
             if pos > 0 and pos < stop_pos:
-                # 找到这个位置之前的一段
                 stop_pos = pos
         
-        # 找到最后一个合理的结尾点（附：之后）
         append_pos = text.find('附：')
         if append_pos > 0 and append_pos < stop_pos:
-            # 找到"附："之后的最后一个句号或换行
             end = text.rfind('\n', append_pos, stop_pos)
             if end > append_pos:
                 stop_pos = end
@@ -1029,36 +1180,32 @@ class Handler(ThreadedHandler):
         text = text[:stop_pos].strip()
         
         # 3. 删除 Markdown 标记
-        # 删除 ** ** 加粗标记
         text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-        # 删除 # 标题标记
         text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
-        # 删除 --- 分割线
         text = re.sub(r'\n---*\n', '\n', text)
-        # 删除多余的 > 引用标记
         text = re.sub(r'^>\s*', '', text, flags=re.MULTILINE)
-        # 删除多余的 ``` 代码块标记
         text = re.sub(r'```[^`]*```', '', text)
         text = re.sub(r'```', '', text)
         
-        # 4. 清理多余空行（保留最多2个连续空行）
+        # 4. 清理多余空行
         text = re.sub(r'\n{4,}', '\n\n\n', text)
         
-        # 5. 确保以"民事上诉状"开头
+        # 5. 确保以文书标题开头，且标题独立成行
         text = text.strip()
-        if not text.startswith('民事上诉状') and '民事上诉状' in text:
-            idx = text.index('民事上诉状')
-            text = text[idx:]
-        
-        # 6. 补充基本格式（如果 AI 没输出完整）
-        if not text.startswith('民事上诉状'):
-            title = '民事上诉状\n'
-            text = title + text
-        
-        # 7. 补充结尾格式（如果 AI 没输出完整）
-        if '附：' not in text and '此致' in text:
-            # 找到上诉法院后补充结尾
-            pass  # AI 通常已经输出完整
+        for t in TITLE_KW:
+            if text.startswith(t):
+                # 标题在开头，确保后面是换行
+                if len(text) > len(t) and text[len(t)] != '\n':
+                    text = t + '\n' + text[len(t):]
+                break
+            elif t in text:
+                # 标题在文中
+                idx = text.index(t)
+                text = t + '\n' + text[idx + len(t):]
+                break
+        else:
+            # 标题不在，加上
+            text = '民事上诉状\n' + text
         
         return text
 
@@ -1067,19 +1214,49 @@ class Handler(ThreadedHandler):
     def _save_history_entry(self, body):
         history = _load_history()
         entry = body.get("entry", {})
-        # 更新或新增
+        doc_type = body.get("doc_type", "")
+        content_val = body.get("content", "")
+        legal_basis = body.get("legal_basis", [])
         fid = entry.get("id", "")
         existing = next((i for i, h in enumerate(history) if h.get("id") == fid), -1)
         if existing >= 0:
             history[existing] = {**history[existing], **entry}
+            if doc_type and content_val:
+                if "generatedDocuments" not in history[existing]:
+                    history[existing]["generatedDocuments"] = {}
+                history[existing]["generatedDocuments"][doc_type] = {
+                    "content": content_val,
+                    "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "legalBasis": legal_basis
+                }
         else:
             history.insert(0, entry)
+            if doc_type and content_val:
+                if "generatedDocuments" not in history[0]:
+                    history[0]["generatedDocuments"] = {}
+                history[0]["generatedDocuments"][doc_type] = {
+                    "content": content_val,
+                    "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "legalBasis": legal_basis
+                }
         _save_history(history)
         return {"success": True}
 
     def _get_history_list(self):
         history = _load_history()
         return {"success": True, "history": history}
+
+    def _get_document(self, body):
+        history = _load_history()
+        fid = body.get("file_id", "")
+        doc_type = body.get("doc_type", "")
+        for h in history:
+            if h.get("id") == fid:
+                gd = h.get("generatedDocuments", {})
+                if doc_type in gd:
+                    return {"success": True, **gd[doc_type]}
+                return {"success": False, "error": "文书未生成"}
+        return {"success": False, "error": "记录不存在"}
 
     def _delete_history_item(self, body):
         history = _load_history()
@@ -1102,10 +1279,16 @@ class Handler(ThreadedHandler):
             results.append({"check": check, "status": status, "msg": msg})
 
         # 1. 标题
-        if re.search(r"^民事上诉状", appeal_text.strip()):
-            add("文书标题", "ok", "标题正确")
+        doc_titles = ["民事上诉状", "民事起诉状", "民事答辩状", "代理词", "执行申请书", "保全申请书"]
+        found_title = None
+        for t in doc_titles:
+            if re.search(f"^{t}", appeal_text.strip()[:100]):
+                found_title = t
+                break
+        if found_title:
+            add("文书标题", "ok", f"标题正确：{found_title}")
         else:
-            add("文书标题", "error", "应以民事上诉状为标题（最高法院文书样式）")
+            add("文书标题", "error", "缺少文书标题（应为民事上诉状/起诉状/答辩状等）")
 
         # 2. 当事人信息 - 民诉法要求明确当事人
         if re.search(r"上诉人.*[：:]", appeal_text):

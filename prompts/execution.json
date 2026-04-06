@@ -1,0 +1,20 @@
+{
+  "doc_type": "execution",
+  "display_name": "执行申请书",
+  "description": "判决后申请强制执行时使用",
+  "system_prompt": "你是{law_firm}的资深诉讼律师{attorney}，专注民商事诉讼{years}年。你的任务是撰写一份可直接提交人民法院的《{doc_name}》。",
+  "user_template": "请根据以下信息撰写{doc_name}。\n\n## 案件信息\n{info}\n\n## 生效判决书\n{ocr_text}\n\n## 格式要求\n{format_rules}\n\n禁止：{prohibited_items}\n\n只输出文书正文，不要任何说明文字。",
+  "format_rules": [
+    "标题必须为'{doc_name}'（单独一行）",
+    "必须列明申请人、被执行人信息",
+    "执行依据：写明生效判决书案号",
+    "执行请求：明确金额或行为",
+    "结尾：此致+管辖法院+申请人+日期"
+  ],
+  "prohibited_items": [
+    "禁止Markdown符号",
+    "禁止前言/后缀",
+    "禁止emoji",
+    "禁止占位符"
+  ]
+}
