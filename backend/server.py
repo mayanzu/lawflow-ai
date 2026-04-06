@@ -20,17 +20,27 @@ else:
 
 # 火山引擎方舟 (备用，无频率限制)
 def _load_env():
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "/opt/lawflow/.env")
-    try:
-        with open(env_path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    k, v = line.split('=', 1)
-                    os.environ[k.strip()] = v.strip()
-    except: pass
+    candidates = []
+    # 项目根目录 .env（便于本地开发）
+    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+    # 线上部署常见路径
+    candidates.append("/opt/lawflow/.env")
+
+    for env_path in candidates:
+        try:
+            if not os.path.exists(env_path):
+                continue
+            with open(env_path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        k, v = line.split('=', 1)
+                        os.environ[k.strip()] = v.strip()
+            break
+        except Exception:
+            continue
 _load_env()
-VOLCENGINE_KEY = os.environ.get('VOLCENGINE_KEY', '2ca8da3c-39f4-42db-a082-74af87001b5e')
+VOLCENGINE_KEY = os.environ.get('VOLCENGINE_KEY', '')
 VOLCENGINE_MODEL = 'doubao-seed-2-0-lite-260215'
 VOLCENGINE_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
 VOLCENGINE_REASONING = 'minimal'  # minimal, low, medium, high
@@ -38,14 +48,22 @@ AI_PROVIDER = 'volcengine'  # openrouter 或 volcengine
 
 # ===== 腾讯云 OCR 配置 =====
 def _load_tencent_creds():
-    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "/opt/lawflow/.env")
-    try:
-        with open(env_path) as f:
-            for line in f:
-                if '=' in line:
-                    k, v = line.strip().split('=', 1)
-                    os.environ[k] = v
-    except: pass
+    candidates = []
+    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
+    candidates.append("/opt/lawflow/.env")
+
+    for env_path in candidates:
+        try:
+            if not os.path.exists(env_path):
+                continue
+            with open(env_path, encoding="utf-8") as f:
+                for line in f:
+                    if '=' in line:
+                        k, v = line.strip().split('=', 1)
+                        os.environ[k] = v
+            break
+        except Exception:
+            continue
 
 _load_tencent_creds()
 TENCENT_SECRET_ID = os.environ.get('TENCENT_SECRET_ID', '')
@@ -392,6 +410,7 @@ _ai_call_lock = threading.Lock()
 # ===== 历史记录 =====
 HISTORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "history.json")
 os.makedirs(os.path.dirname(HISTORY_FILE), exist_ok=True)
+_history_lock = threading.Lock()
 
 def _load_history():
     try:
@@ -402,8 +421,15 @@ def _load_history():
 
 def _save_history(history):
     history = history[:20]  # 最多保留20条
-    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+    tmp_path = HISTORY_FILE + ".tmp"
+    with open(tmp_path, 'w', encoding='utf-8') as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:
+            pass
+    os.replace(tmp_path, HISTORY_FILE)
 
 # ===== Prompt 模板引擎 =====
 PROMPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "prompts")
@@ -462,6 +488,10 @@ def _call_ai_stream(prompt, system="", retries=2, callback=None):
     
     for attempt in range(retries + 1):
         if AI_PROVIDER == 'volcengine':
+            if not VOLCENGINE_KEY:
+                if callback:
+                    callback("[AI 配置错误: VOLCENGINE_KEY 未设置]")
+                return
             # 火山方舟 API (openai 兼容格式)
             body_dict = {"model": VOLCENGINE_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25, "stream": True}
             body_dict["reasoning_effort"] = VOLCENGINE_REASONING
@@ -470,6 +500,10 @@ def _call_ai_stream(prompt, system="", retries=2, callback=None):
             req.add_header("Content-Type", "application/json")
             req.add_header("Authorization", f"Bearer {VOLCENGINE_KEY}")
         else:
+            if not OPENROUTER_KEY:
+                if callback:
+                    callback("[AI 配置错误: OPENROUTER_API_KEY 未设置]")
+                return
             # OpenRouter API
             body = json.dumps({"model": OPENROUTER_MODEL, "messages": msgs, "max_tokens": 6144, "temperature": 0.25, "stream": True})
             req = Request("https://openrouter.ai/api/v1/chat/completions", data=body.encode(), method="POST")
@@ -670,7 +704,11 @@ class Handler(ThreadedHandler):
         # 安全：限制只能访问 uploads 目录
         real_path = os.path.realpath(path)
         uploads_real = os.path.realpath(UPLOAD_DIR)
-        if not real_path.startswith(uploads_real):
+        try:
+            if os.path.commonpath([real_path, uploads_real]) != uploads_real:
+                print(f"[SECURITY] Path traversal blocked: {path}", flush=True)
+                return {"success": False, "error": "Access denied"}
+        except Exception:
             print(f"[SECURITY] Path traversal blocked: {path}", flush=True)
             return {"success": False, "error": "Access denied"}
         if not os.path.exists(path):
@@ -899,7 +937,7 @@ class Handler(ThreadedHandler):
 
             text_so_far = "".join(full_text)
             # 后处理清理
-            cleaned = self._clean_appeal_text(text_so_far, info, doc_type)
+            cleaned = self._clean_appeal_text(text_so_far, info)
 
             # 校验（流式不重试，避免客户端重复显示内容——最终兜底会替换占位符）
             # 最终兜底：替换残留占位符
@@ -1214,62 +1252,67 @@ class Handler(ThreadedHandler):
 
 
     def _save_history_entry(self, body):
-        history = _load_history()
-        entry = body.get("entry", {})
-        doc_type = body.get("doc_type", "")
-        content_val = body.get("content", "")
-        legal_basis = body.get("legal_basis", [])
-        fid = entry.get("id", "")
-        existing = next((i for i, h in enumerate(history) if h.get("id") == fid), -1)
-        if existing >= 0:
-            history[existing] = {**history[existing], **entry}
-            if doc_type and content_val:
-                if "generatedDocuments" not in history[existing]:
-                    history[existing]["generatedDocuments"] = {}
-                history[existing]["generatedDocuments"][doc_type] = {
-                    "content": content_val,
-                    "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "legalBasis": legal_basis
-                }
-        else:
-            history.insert(0, entry)
-            if doc_type and content_val:
-                if "generatedDocuments" not in history[0]:
-                    history[0]["generatedDocuments"] = {}
-                history[0]["generatedDocuments"][doc_type] = {
-                    "content": content_val,
-                    "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                    "legalBasis": legal_basis
-                }
-        _save_history(history)
-        return {"success": True}
+        with _history_lock:
+            history = _load_history()
+            entry = body.get("entry", {})
+            doc_type = body.get("doc_type", "")
+            content_val = body.get("content", "")
+            legal_basis = body.get("legal_basis", [])
+            fid = entry.get("id", "")
+            existing = next((i for i, h in enumerate(history) if h.get("id") == fid), -1)
+            if existing >= 0:
+                history[existing] = {**history[existing], **entry}
+                if doc_type and content_val:
+                    if "generatedDocuments" not in history[existing]:
+                        history[existing]["generatedDocuments"] = {}
+                    history[existing]["generatedDocuments"][doc_type] = {
+                        "content": content_val,
+                        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "legalBasis": legal_basis
+                    }
+            else:
+                history.insert(0, entry)
+                if doc_type and content_val:
+                    if "generatedDocuments" not in history[0]:
+                        history[0]["generatedDocuments"] = {}
+                    history[0]["generatedDocuments"][doc_type] = {
+                        "content": content_val,
+                        "generatedAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        "legalBasis": legal_basis
+                    }
+            _save_history(history)
+            return {"success": True}
 
     def _get_history_list(self):
-        history = _load_history()
-        return {"success": True, "history": history}
+        with _history_lock:
+            history = _load_history()
+            return {"success": True, "history": history}
 
     def _get_document(self, body):
-        history = _load_history()
-        fid = body.get("file_id", "")
-        doc_type = body.get("doc_type", "")
-        for h in history:
-            if h.get("id") == fid:
-                gd = h.get("generatedDocuments", {})
-                if doc_type in gd:
-                    return {"success": True, **gd[doc_type]}
-                return {"success": False, "error": "文书未生成"}
-        return {"success": False, "error": "记录不存在"}
+        with _history_lock:
+            history = _load_history()
+            fid = body.get("file_id", "")
+            doc_type = body.get("doc_type", "")
+            for h in history:
+                if h.get("id") == fid:
+                    gd = h.get("generatedDocuments", {})
+                    if doc_type in gd:
+                        return {"success": True, **gd[doc_type]}
+                    return {"success": False, "error": "文书未生成"}
+            return {"success": False, "error": "记录不存在"}
 
     def _delete_history_item(self, body):
-        history = _load_history()
-        fid = body.get("file_id", "")
-        history = [h for h in history if h.get("id") != fid]
-        _save_history(history)
-        return {"success": True}
+        with _history_lock:
+            history = _load_history()
+            fid = body.get("file_id", "")
+            history = [h for h in history if h.get("id") != fid]
+            _save_history(history)
+            return {"success": True}
 
     def _clear_history(self):
-        _save_history([])
-        return {"success": True}
+        with _history_lock:
+            _save_history([])
+            return {"success": True}
 
     def _validate_appeal(self, appeal_text, info):
         """校验上诉状格式，依据民诉法第165条、最高法院诉讼文书样式"""
