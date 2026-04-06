@@ -7,6 +7,7 @@ import time
 import threading
 import uuid
 from enum import Enum
+from functools import partial
 from typing import Dict, Optional, Callable, Any
 from dataclasses import dataclass, asdict
 from concurrent.futures import ThreadPoolExecutor
@@ -151,12 +152,26 @@ class AsyncTaskManager:
         with self._lock:
             self._running_tasks[task_id] = cancel_event
         
-        # 提交到线程池
-        future = self._executor.submit(self._wrap_task, task_id, cancel_event, task_func, *args, **kwargs)
+        # 判断是否为 bound method
+        if hasattr(task_func, '__self__') and hasattr(task_func, '__name__'):
+            # bound method：提取 handler 和方法名，通过 getattr 调用
+            handler_ref = {
+                'is_bound': True,
+                'handler': task_func.__self__,
+                'method_name': task_func.__name__,
+                'cancel_event': cancel_event,
+                'args': args,
+                'kwargs': kwargs,
+            }
+            future = self._executor.submit(self._wrap_task, task_id, handler_ref)
+        else:
+            # 普通函数：直接传递
+            future = self._executor.submit(self._wrap_task, task_id, task_func, cancel_event, *args, **kwargs)
         return True
     
-    def _wrap_task(self, task_id: str, cancel_event: threading.Event, task_func: Callable, *args, **kwargs):
+    def _wrap_task(self, task_id: str, handler_ref: dict):
         """包装任务执行，处理状态更新"""
+        cancel_event = self._running_tasks.get(task_id)
         try:
             # 更新为处理中状态
             self.update_task(
@@ -167,7 +182,14 @@ class AsyncTaskManager:
             )
             
             # 执行实际任务
-            result = task_func(cancel_event=cancel_event, *args, **kwargs)
+            if isinstance(handler_ref, dict) and handler_ref.get('is_bound'):
+                handler = handler_ref['handler']
+                method = getattr(handler, handler_ref['method_name'])
+                result = method(cancel_event, *handler_ref['args'], **handler_ref['kwargs'])
+            else:
+                # 普通函数直接调用
+                task_func = handler_ref
+                result = task_func(cancel_event, *([task_id] if callable(task_func) else []))
             
             # 检查是否被取消
             if cancel_event.is_set():
