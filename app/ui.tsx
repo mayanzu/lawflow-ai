@@ -163,3 +163,10 @@ export function Spinner({ size = 32 }: { size?: number }) {
     }} />
   )
 }
+
+// Funnel / hourglass loading icon for processing steps
+export const FunnelIcon = ({ size = 22, color = C.blue }: { size?: number; color?: string }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite', display: 'block' }}>
+    <path d="M22 3H2l8 9.46V19l4 2V12.46L22 3z"/>
+  </svg>
+)

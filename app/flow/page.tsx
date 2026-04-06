@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { C, Nav, Card, Spinner, Btn, Icons } from '@/ui'
+import { C, Nav, Card, Spinner, Btn, FunnelIcon, Icons } from '@/ui'
 import { storage } from '@/lib/storage'
 import { DOC_TYPES as DOC_TYPES_CONFIG, type CaseInfo } from '@/lib/types'
 
