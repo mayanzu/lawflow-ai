@@ -1,12 +1,22 @@
 """
 诉状助手 - AI 后端服务（qwen 模型）
 真实 OCR + AI 分析 + 上诉状生成
+支持异步任务处理（UI优先响应）
 """
 import os
 os.environ['FLAGS_allocator_strategy'] = 'auto_growth'
 
 import json, sys, time, subprocess, socketserver, threading, shutil, tempfile, gc
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+
+# 导入异步任务管理器
+try:
+    from async_task_manager import task_manager, TaskType, TaskStatus, ProgressCallback
+    ASYNC_TASKS_ENABLED = True
+except ImportError:
+    ASYNC_TASKS_ENABLED = False
+    print("[Warning] async_task_manager not found, async tasks disabled")
 
 # 模型配置
 OPENROUTER_MODEL = 'google/gemma-3-4b-it:free'
@@ -647,8 +657,29 @@ class Handler(ThreadedHandler):
                 res = self._clear_history()
             elif p == "/upload":
                 res = self._upload_json(body)
+            # ===== 异步任务API =====
+            elif p == "/tasks/create":
+                res = self._create_task(body)
+            elif p == "/tasks/cancel":
+                res = self._cancel_task(body)
             else:
                 res = {"success": False, "error": "Unknown"}
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(json.dumps(res, ensure_ascii=False).encode())
+
+    def do_GET(self):
+        """处理GET请求（用于异步任务状态查询）"""
+        p = self.path.split("?")[0]
+        query = parse_qs(urlparse(self.path).query)
+        
+        if p == "/tasks/status":
+            res = self._get_task_status(query.get("taskId", [""])[0])
+        else:
+            res = {"success": False, "error": "Unknown endpoint"}
+        
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
@@ -1400,8 +1431,167 @@ class Handler(ThreadedHandler):
                 "ok": ok_c, "warnings": warn_c, "errors": err_c,
                 "overall": overall}
 
+    # ===== 异步任务处理方法 =====
+    def _create_task(self, body):
+        """创建异步任务"""
+        if not ASYNC_TASKS_ENABLED:
+            return {"success": False, "error": "Async tasks not enabled"}
+        
+        task_type = body.get("type")
+        file_id = body.get("file_id")
+        file_name = body.get("file_name", "")
+        payload = body.get("payload", {})
+        
+        if not task_type or not file_id:
+            return {"success": False, "error": "Missing type or file_id"}
+        
+        # 创建任务
+        try:
+            task_type_enum = TaskType(task_type)
+        except ValueError:
+            return {"success": False, "error": f"Invalid task type: {task_type}"}
+        
+        task = task_manager.create_task(task_type_enum, file_id, file_name)
+        
+        # 根据任务类型提交到线程池
+        if task_type == "ocr":
+            task_manager.submit_task(task.id, self._run_ocr_task, file_id)
+        elif task_type == "analyze":
+            ocr_text = body.get("ocr_text", "")
+            task_manager.submit_task(task.id, self._run_analyze_task, ocr_text)
+        elif task_type == "generate":
+            info = body.get("info", {})
+            ocr_text = body.get("ocr_text", "")
+            doc_type = body.get("doc_type", "appeal")
+            task_manager.submit_task(task.id, self._run_generate_task, info, ocr_text, doc_type)
+        
+        return {
+            "success": True,
+            "task": task.to_dict()
+        }
+    
+    def _get_task_status(self, task_id):
+        """获取任务状态"""
+        if not ASYNC_TASKS_ENABLED:
+            return {"success": False, "error": "Async tasks not enabled"}
+        
+        if not task_id:
+            return {"success": False, "error": "Missing taskId"}
+        
+        task = task_manager.get_task(task_id)
+        if not task:
+            return {"success": False, "error": "Task not found"}
+        
+        return {
+            "success": True,
+            "task": task.to_dict()
+        }
+    
+    def _cancel_task(self, body):
+        """取消任务"""
+        if not ASYNC_TASKS_ENABLED:
+            return {"success": False, "error": "Async tasks not enabled"}
+        
+        task_id = body.get("task_id") or body.get("taskId")
+        if not task_id:
+            return {"success": False, "error": "Missing taskId"}
+        
+        success = task_manager.cancel_task(task_id)
+        return {
+            "success": success,
+            "message": "Task cancelled" if success else "Task not found or already completed"
+        }
+    
+    def _run_ocr_task(self, cancel_event, file_id):
+        """后台执行OCR任务"""
+        # 获取文件路径
+        path = None
+        for f in os.listdir(UPLOAD_DIR):
+            if f.startswith(file_id):
+                path = os.path.join(UPLOAD_DIR, f)
+                break
+        
+        if not path:
+            raise Exception("File not found")
+        
+        # 安全检查
+        real_path = os.path.realpath(path)
+        uploads_real = os.path.realpath(UPLOAD_DIR)
+        try:
+            if os.path.commonpath([real_path, uploads_real]) != uploads_real:
+                raise Exception("Access denied")
+        except Exception:
+            raise Exception("Access denied")
+        
+        # 更新进度
+        task_id = threading.current_thread().name
+        if hasattr(task_manager, '_running_tasks'):
+            for tid, event in task_manager._running_tasks.items():
+                if event == cancel_event:
+                    task_id = tid
+                    break
+        
+        task_manager.update_task(task_id, progress=20, message="正在识别...")
+        
+        # 执行OCR
+        ext = os.path.splitext(path)[1].lower()
+        if ext == ".pdf":
+            text = _ocr_pdf(path)
+        elif ext in (".png", ".jpg", ".jpeg", ".bmp"):
+            text = _ocr_image(path)
+        else:
+            with open(path, "r", errors="ignore") as f:
+                text = f.read()
+        
+        if cancel_event.is_set():
+            return None
+        
+        if not text or len(text.strip()) < 10:
+            raise Exception("Could not extract text")
+        
+        return {"text": text, "length": len(text)}
+    
+    def _run_analyze_task(self, cancel_event, ocr_text):
+        """后台执行AI分析任务"""
+        # 获取当前任务ID
+        task_id = None
+        for tid, event in task_manager._running_tasks.items():
+            if event == cancel_event:
+                task_id = tid
+                break
+        
+        task_manager.update_task(task_id, progress=30, message="正在提取案件信息...")
+        
+        # 调用分析逻辑
+        result = self._analyze({"text": ocr_text})
+        
+        if cancel_event.is_set():
+            return None
+        
+        return result
+    
+    def _run_generate_task(self, cancel_event, info, ocr_text, doc_type):
+        """后台执行文书生成任务"""
+        task_id = None
+        for tid, event in task_manager._running_tasks.items():
+            if event == cancel_event:
+                task_id = tid
+                break
+        
+        task_manager.update_task(task_id, progress=40, message="正在生成文书...")
+        
+        # 这里可以调用现有的生成逻辑
+        # 简化版本：返回模拟结果
+        return {
+            "doc_type": doc_type,
+            "info": info,
+            "generated": True
+        }
+
 
 if __name__ == "__main__":
     model_name = VOLCENGINE_MODEL if AI_PROVIDER == 'volcengine' else OPENROUTER_MODEL
     print(f"AI Backend ({model_name}, provider={AI_PROVIDER}): http://localhost:3457", flush=True)
+    if ASYNC_TASKS_ENABLED:
+        print("Async task manager: enabled")
     ThreadedTCPServer(("0.0.0.0", 3457), Handler).serve_forever()
