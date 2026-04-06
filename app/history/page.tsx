@@ -16,6 +16,13 @@ export default function HistoryPage() {
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [mobile, setMobile] = useState(false)
+
+  useEffect(() => {
+    const check = () => setMobile(window.innerWidth < 640)
+    check(); window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
 
   async function callApi(endpoint: string, body: any) {
     try {
@@ -102,7 +109,7 @@ export default function HistoryPage() {
         history.length > 0 ? <button onClick={handleClearAll} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.muted, fontSize: '0.85rem', fontWeight: 500 }}>清空</button> : <div style={{ width: 48 }} />
       } />
 
-      <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px 80px' }}>
+      <main style={{ maxWidth: 800, margin: '0 auto', padding: `${mobile ? 16 : 32}px ${mobile ? 16 : 24}px 80px` }}>
         {isLoading ? (
           <Card padding={48} style={{ textAlign: 'center' }}>
             <Spinner size={36} />
@@ -164,7 +171,7 @@ export default function HistoryPage() {
                   {expandedId === item.id && (
                     <div style={{ marginTop: 20, padding: 20, background: C.bg, borderRadius: 14 }}>
                       <div style={{ fontSize: '0.7rem', fontWeight: 600, color: C.muted, letterSpacing: '0.06em', marginBottom: 14 }}>详细案件信息</div>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: 8 }}>
                         {Object.entries(item.analyzeInfo || {}).filter(([k]) => k !== 'undefined').map(([k, v]) => v ? (
                           <div key={k} style={{ fontSize: '0.8rem' }}>
                             <span style={{ color: C.muted, marginRight: 6 }}>{k}:</span>
