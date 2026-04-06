@@ -132,6 +132,10 @@ export const Icons = {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
     </svg>),
+  chevronRight: (size = 16, color: string = C.blue) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9 18 15 12 9 6"/>
+    </svg>),
   check: (size = 14, color = '#FFF') => (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
       <path d="M13 4L6 11.5L3 8.5" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>

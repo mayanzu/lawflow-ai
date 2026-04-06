@@ -210,6 +210,24 @@ function FlowContent() {
           </Card>
         )}
 
+        {/* OCR 折叠 - 移到上面 */}
+        {ocrText && allDone && (
+          <div style={{ borderRadius: 16, overflow: 'hidden', border: `1px solid ${C.border}`, marginBottom: 24 }}>
+            <div onClick={() => setOcrExpanded(v => !v)} style={{ padding: '14px 18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: C.white }}>
+              <div>
+                <div style={{ fontSize: '0.7rem', fontWeight: 600, color: C.muted, letterSpacing: '0.06em', marginBottom: 2 }}>OCR 识别原文</div>
+                <div style={{ fontSize: '0.78rem', color: C.muted }}>{ocrText.length.toLocaleString()} 字</div>
+              </div>
+              <div style={{ fontSize: '0.78rem', color: C.blue, fontWeight: 500 }}>{ocrExpanded ? '收起' : '展开'}</div>
+            </div>
+            {ocrExpanded && (
+              <div style={{ padding: '0 18px 14px', maxHeight: mobile ? 200 : 280, overflow: 'auto', background: C.bg }}>
+                <pre style={{ margin: 0, fontSize: '0.78rem', lineHeight: 1.8, color: C.sub, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit' }}>{ocrText}</pre>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* 文书类型选择 */}
         {allDone && (
           <div style={{ marginBottom: 32 }}>
@@ -219,44 +237,35 @@ function FlowContent() {
                 const isSelected = selectedDoc === doc.key
                 const Icon = ICON_MAP[doc.icon!]
                 return (
-                  <div key={doc.key} onClick={() => handleSelectDoc(doc.key)} style={{
-                    background: isSelected ? '#E8F0FE' : C.white, borderRadius: mobile ? 16 : 20,
-                    padding: mobile ? '16px 14px' : '20px 18px', cursor: 'pointer',
-                    border: isSelected ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
-                    transition: 'all 0.2s ease', display: 'flex', alignItems: 'center', gap: 14,
+                  <button key={doc.key} onClick={() => handleSelectDoc(doc.key)} style={{
+                    background: isSelected ? C.blue : C.white, borderRadius: mobile ? 14 : 16,
+                    padding: mobile ? '14px 16px' : '16px 18px', cursor: 'pointer',
+                    border: isSelected ? `2px solid ${C.blue}` : `1.5px solid ${C.border}`,
+                    transition: 'all 0.18s ease', display: 'flex', alignItems: 'center', gap: 12,
+                    textAlign: 'left', boxShadow: isSelected ? `0 4px 16px rgba(0,113,227,0.25)` : `0 1px 4px rgba(0,0,0,0.04)`,
+                    transform: 'none',
+                    outline: 'none',
                   }}
-                  onMouseEnter={e => { if (!isSelected) { (e.currentTarget as HTMLDivElement).style.borderColor = C.blue } }}
-                  onMouseLeave={e => { if (!isSelected) { (e.currentTarget as HTMLDivElement).style.borderColor = C.border } }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 12, background: isSelected ? C.blue : C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.2s' }}>
+                  onMouseEnter={e => { if (!isSelected) { (e.currentTarget as HTMLButtonElement).style.borderColor = C.blue; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 4px 16px rgba(0,113,227,0.15)' } }}
+                  onMouseLeave={e => { if (!isSelected) { (e.currentTarget as HTMLButtonElement).style.borderColor = C.border; (e.currentTarget as HTMLButtonElement).style.boxShadow = '0 1px 4px rgba(0,0,0,0.04)' } }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 11, background: isSelected ? 'rgba(255,255,255,0.25)' : C.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.18s' }}>
                       {Icon!(18, isSelected ? '#FFF' : C.blue)}
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: C.text, letterSpacing: '-0.02em' }}>{doc.name}</div>
-                      <div style={{ fontSize: '0.72rem', color: C.muted, marginTop: 2 }}>{doc.desc}</div>
+                      <div style={{ fontSize: '0.9rem', fontWeight: 600, color: isSelected ? '#FFF' : C.text, letterSpacing: '-0.02em', lineHeight: 1.3 }}>{doc.name}</div>
+                      <div style={{ fontSize: '0.72rem', color: isSelected ? 'rgba(255,255,255,0.75)' : C.muted, marginTop: 2 }}>{doc.desc}</div>
                     </div>
-                    {isSelected && Icons.check(14, C.blue)}
-                  </div>
+                    {isSelected ? (
+                      <div style={{ width: 22, height: 22, borderRadius: '50%', background: '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                        {Icons.check(13, C.blue)}
+                      </div>
+                    ) : (
+                      <div style={{ color: '#CBD3E0', flexShrink: 0 }}>{Icons.chevronRight(16, '#CBD3E0')}</div>
+                    )}
+                  </button>
                 )
               })}
             </div>
-          </div>
-        )}
-
-        {/* OCR 折叠 */}
-        {ocrText && allDone && (
-          <div style={{ borderRadius: 16, overflow: 'hidden', border: `1px solid ${C.border}` }}>
-            <div onClick={() => setOcrExpanded(v => !v)} style={{ padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: C.white }}>
-              <div>
-                <div style={{ fontSize: '0.7rem', fontWeight: 600, color: C.muted, letterSpacing: '0.06em', marginBottom: 2 }}>OCR 识别原文</div>
-                <div style={{ fontSize: '0.78rem', color: C.muted }}>{ocrText.length.toLocaleString()} 字</div>
-              </div>
-              <div style={{ fontSize: '0.78rem', color: C.blue, fontWeight: 500 }}>{ocrExpanded ? '收起' : '展开'}</div>
-            </div>
-            {ocrExpanded && (
-              <div style={{ padding: '0 16px 14px', maxHeight: mobile ? 200 : 280, overflow: 'auto', background: C.bg }}>
-                <pre style={{ margin: 0, fontSize: '0.78rem', lineHeight: 1.8, color: C.sub, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'inherit' }}>{ocrText}</pre>
-              </div>
-            )}
           </div>
         )}
       </main>
