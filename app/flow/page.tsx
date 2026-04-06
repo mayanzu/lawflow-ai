@@ -110,7 +110,7 @@ function FlowContent() {
   useEffect(() => {
     const fid = storage.get<string>('file_id', '')
     const fname = storage.get<string>('file_name', '') || search.get('file') || ''
-    fileIdRef.current = fid; setFileName(fname)
+    fileIdRef.current = fid || ''; setFileName(fname)
     if (!fid) { router.push('/'); return }
     setTimeout(() => processFile(), 300)
   // eslint-disable-next-line
@@ -217,7 +217,7 @@ function FlowContent() {
             <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: mobile ? 10 : 14 }}>
               {DOC_TYPES.map(doc => {
                 const isSelected = selectedDoc === doc.key
-                const Icon = ICON_MAP[doc.icon]
+                const Icon = ICON_MAP[doc.icon!]
                 return (
                   <div key={doc.key} onClick={() => handleSelectDoc(doc.key)} style={{
                     background: isSelected ? '#E8F0FE' : C.white, borderRadius: mobile ? 16 : 20,

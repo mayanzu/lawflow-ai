@@ -35,7 +35,7 @@ export interface DocType {
   key: string
   name: string
   desc: string
-  icon?: string
+  icon: string
 }
 
 export interface UploadResponse {
@@ -90,12 +90,12 @@ export interface TaskResponse {
 }
 
 export const DOC_TYPES: DocType[] = [
-  { key: 'appeal', name: '民事上诉状', desc: '不服一审判决时使用' },
-  { key: 'complaint', name: '民事起诉状', desc: '新案立案时使用' },
-  { key: 'defense', name: '民事答辩状', desc: '被诉后答辩时使用' },
-  { key: 'representation', name: '代理词', desc: '庭审总结时使用' },
-  { key: 'execution', name: '执行申请书', desc: '判决后申请强制执行时使用' },
-  { key: 'preservation', name: '保全申请书', desc: '诉讼前/中申请财产保全时使用' },
+  { key: 'appeal', name: '民事上诉状', desc: '不服一审判决时使用', icon: 'doc' },
+  { key: 'complaint', name: '民事起诉状', desc: '新案立案时使用', icon: 'fileText' },
+  { key: 'defense', name: '民事答辩状', desc: '被诉后答辩时使用', icon: 'shield' },
+  { key: 'representation', name: '代理词', desc: '庭审总结时使用', icon: 'scale' },
+  { key: 'execution', name: '执行申请书', desc: '判决后申请强制执行时使用', icon: 'clock' },
+  { key: 'preservation', name: '保全申请书', desc: '诉讼前/中申请财产保全时使用', icon: 'lock' },
 ]
 
 export const CASE_INFO_FIELDS: (keyof CaseInfo)[] = [

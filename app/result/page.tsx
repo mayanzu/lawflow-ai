@@ -36,7 +36,7 @@ export default function ResultPage() {
         const m = String(parsed.判决日期).match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
         if (m) parsed.判决日期 = `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
       }
-      setInfoFields(parsed)
+      setInfoFields({ ...parsed } as Record<string, string>)
       startStreaming(storage.get<string>('doc_type', 'appeal'))
     }
     const savedDoc = storage.get<string>('doc_type', 'appeal')
