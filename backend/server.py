@@ -1,5 +1,5 @@
 """
-诉状助手 - AI 后端服务（qwen 模型）
+诉状助手 - AI 后端服务
 真实 OCR + AI 分析 + 上诉状生成
 支持异步任务处理（UI优先响应）
 """
@@ -10,7 +10,6 @@ import json, sys, time, subprocess, socketserver, threading, shutil, tempfile, g
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
-# 导入异步任务管理器
 try:
     from async_task_manager import task_manager, TaskType, TaskStatus, ProgressCallback
     ASYNC_TASKS_ENABLED = True
@@ -18,24 +17,12 @@ except ImportError:
     ASYNC_TASKS_ENABLED = False
     print("[Warning] async_task_manager not found, async tasks disabled")
 
-# 模型配置
-OPENROUTER_MODEL = 'google/gemma-3-4b-it:free'
-OAUTH_PATH = '/root/.openclaw/agents/main/agent/auth-profiles.json'
-if os.path.exists(OAUTH_PATH):
-    with open(OAUTH_PATH) as f:
-        _auth = json.load(f).get('profiles', {})
-    OPENROUTER_KEY = _auth.get('openrouter:default', {}).get('key', '')
-else:
-    OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '')
-
-# 火山引擎方舟 (备用，无频率限制)
-def _load_env():
-    candidates = []
-    # 项目根目录 .env（便于本地开发）
-    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
-    # 线上部署常见路径
-    candidates.append("/opt/lawflow/.env")
-
+def _load_env_file():
+    """Load environment variables from .env file"""
+    candidates = [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"),
+        "/opt/lawflow/.env",
+    ]
     for env_path in candidates:
         try:
             if not os.path.exists(env_path):
@@ -49,36 +36,24 @@ def _load_env():
             break
         except Exception:
             continue
-_load_env()
+
+_load_env_file()
+
+OPENROUTER_MODEL = os.environ.get('OPENROUTER_MODEL', 'google/gemma-3-4b-it:free')
+OPENROUTER_KEY = os.environ.get('OPENROUTER_API_KEY', '')
+
 VOLCENGINE_KEY = os.environ.get('VOLCENGINE_KEY', '')
-VOLCENGINE_MODEL = 'doubao-seed-2-0-lite-260215'
-VOLCENGINE_ENDPOINT = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions'
-VOLCENGINE_REASONING = 'minimal'  # minimal, low, medium, high
-AI_PROVIDER = 'volcengine'  # openrouter 或 volcengine
+VOLCENGINE_MODEL = os.environ.get('VOLCENGINE_MODEL', 'doubao-seed-2-0-lite-260215')
+VOLCENGINE_ENDPOINT = os.environ.get('VOLCENGINE_ENDPOINT', 'https://ark.cn-beijing.volces.com/api/v3/chat/completions')
+VOLCENGINE_REASONING = os.environ.get('VOLCENGINE_REASONING', 'minimal')
+AI_PROVIDER = os.environ.get('AI_PROVIDER', 'volcengine')
 
-# ===== 腾讯云 OCR 配置 =====
-def _load_tencent_creds():
-    candidates = []
-    candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".env"))
-    candidates.append("/opt/lawflow/.env")
-
-    for env_path in candidates:
-        try:
-            if not os.path.exists(env_path):
-                continue
-            with open(env_path, encoding="utf-8") as f:
-                for line in f:
-                    if '=' in line:
-                        k, v = line.strip().split('=', 1)
-                        os.environ[k] = v
-            break
-        except Exception:
-            continue
-
-_load_tencent_creds()
 TENCENT_SECRET_ID = os.environ.get('TENCENT_SECRET_ID', '')
 TENCENT_SECRET_KEY = os.environ.get('TENCENT_SECRET_KEY', '')
+TENCENT_OCR_REGION = os.environ.get('TENCENT_OCR_REGION', 'ap-guangzhou')
 USE_TENCENT_OCR = bool(TENCENT_SECRET_ID and TENCENT_SECRET_KEY)
+
+CORS_ALLOWED_ORIGINS = os.environ.get('CORS_ALLOWED_ORIGINS', '*')
 
 def _tencent_ocr_base64(image_base64):
     "调用腾讯云通用印刷体识别接口"
@@ -88,7 +63,7 @@ def _tencent_ocr_base64(image_base64):
         from tencentcloud.ocr.v20181119 import ocr_client, models
         
         cred = credential.Credential(TENCENT_SECRET_ID, TENCENT_SECRET_KEY)
-        client = ocr_client.OcrClient(cred, "ap-guangzhou")
+        client = ocr_client.OcrClient(cred, TENCENT_OCR_REGION)
         req = models.GeneralBasicOCRRequest()
         req.ImageBase64 = image_base64
         # 识别所有语言（默认中文）
@@ -596,8 +571,8 @@ class Handler(ThreadedHandler):
 
     def do_OPTIONS(self):
         self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Origin", CORS_ALLOWED_ORIGINS)
+        self.send_header("Access-Control-Allow-Methods", "POST, OPTIONS, GET")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
         self.end_headers()
 
@@ -666,7 +641,7 @@ class Handler(ThreadedHandler):
                 res = {"success": False, "error": "Unknown"}
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", CORS_ALLOWED_ORIGINS)
         self.end_headers()
         self.wfile.write(json.dumps(res, ensure_ascii=False).encode())
 
@@ -682,7 +657,7 @@ class Handler(ThreadedHandler):
         
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
-        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Origin", CORS_ALLOWED_ORIGINS)
         self.end_headers()
         self.wfile.write(json.dumps(res, ensure_ascii=False).encode())
 
@@ -949,7 +924,7 @@ class Handler(ThreadedHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Origin", CORS_ALLOWED_ORIGINS)
             self.end_headers()
 
             def stream_task():
@@ -1042,7 +1017,7 @@ class Handler(ThreadedHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
-            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Origin", CORS_ALLOWED_ORIGINS)
             self.end_headers()
 
             def stream_task():

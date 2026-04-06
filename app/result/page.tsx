@@ -2,15 +2,10 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { C, Nav, Card, Btn, Spinner, Icons } from '@/ui'
+import { storage } from '@/lib/storage'
+import { DOC_TYPES as DOC_TYPES_CONFIG, type CaseInfo } from '@/lib/types'
 
-const DOC_TYPES = [
-  { key: 'appeal',         name: '民事上诉状',   desc: '不服一审判决' },
-  { key: 'complaint',      name: '民事起诉状',   desc: '新案立案' },
-  { key: 'defense',        name: '民事答辩状',   desc: '被诉后答辩' },
-  { key: 'representation', name: '代理词',       desc: '庭审总结' },
-  { key: 'execution',      name: '执行申请书',   desc: '申请强制执行' },
-  { key: 'preservation',   name: '保全申请书',   desc: '诉讼中保全' },
-]
+const DOC_TYPES = DOC_TYPES_CONFIG
 
 export default function ResultPage() {
   const router = useRouter()
@@ -35,20 +30,17 @@ export default function ResultPage() {
   }, [])
 
   useEffect(() => {
-    const raw = localStorage.getItem('lw_analyze_info')
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw)
-        if (parsed.判决日期) {
-          const m = String(parsed.判决日期).match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
-          if (m) parsed.判决日期 = `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
-        }
-        setInfoFields(parsed)
-      } catch {}
+    const parsed = storage.get<CaseInfo>('analyze_info', {} as CaseInfo)
+    if (parsed && Object.keys(parsed).length > 0) {
+      if (parsed.判决日期) {
+        const m = String(parsed.判决日期).match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
+        if (m) parsed.判决日期 = `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
+      }
+      setInfoFields(parsed)
+      startStreaming(storage.get<string>('doc_type', 'appeal'))
     }
-    const savedDoc = localStorage.getItem('lw_doc_type')
+    const savedDoc = storage.get<string>('doc_type', 'appeal')
     if (savedDoc) setDocType(savedDoc)
-    if (raw) startStreaming(savedDoc || 'appeal')
   // eslint-disable-next-line
   }, [])
 
@@ -62,8 +54,8 @@ export default function ResultPage() {
     const type = typeOverride || docType
     setIsGenerating(true); setStreamDone(false); setStreamingText(''); setEditedText('')
     try {
-      const ocrText = localStorage.getItem('lw_ocr_text') || ''
-      const info = JSON.parse(localStorage.getItem('lw_analyze_info') || '{}')
+      const ocrText = storage.get<string>('ocr_text', '')
+      const info = storage.get<CaseInfo>('analyze_info', {} as CaseInfo)
       const res = await fetch('/api/generate-doc-stream', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ info, ocr_text: ocrText, doc_type: type }),
@@ -90,15 +82,12 @@ export default function ResultPage() {
               else if (data.type === 'done') {
                 const finalText = (data.appeal || '').trim()
                 setEditedText(finalText); setStreamingText(finalText)
-                localStorage.setItem('lw_appeal_text', finalText)
-                localStorage.setItem('lw_doc_type', type)
-                try {
-                  const hist = JSON.parse(localStorage.getItem('lw_history') || '[]')
-                  const fid = localStorage.getItem('lw_file_id') || ''
-                  const idx = hist.findIndex((h: any) => h.id === fid)
-                  if (idx >= 0) { hist[idx].appealText = finalText; localStorage.setItem('lw_history', JSON.stringify(hist)) }
-                } catch {}
-                if (data.legal_basis?.length > 0) { setLegalBasis(data.legal_basis); localStorage.setItem('lw_legal_basis', JSON.stringify(data.legal_basis)) }
+                storage.set('appeal_text', finalText)
+                storage.set('doc_type', type)
+                if (data.legal_basis?.length > 0) { 
+                  setLegalBasis(data.legal_basis)
+                  storage.set('legal_basis', data.legal_basis)
+                }
                 setStreamDone(true); setIsGenerating(false)
               }
             } catch {}
@@ -152,7 +141,7 @@ export default function ResultPage() {
                   <label key={k}>
                     <div style={{ fontSize: '0.7rem', fontWeight: 600, color: C.muted, marginBottom: 4 }}>{k}</div>
                     <input type={k === '判决日期' ? 'date' : 'text'} value={infoFields[k] || ''}
-                      onChange={e => { const u = { ...infoFields, [k]: e.target.value }; setInfoFields(u); localStorage.setItem('lw_analyze_info', JSON.stringify(u)) }}
+                      onChange={e => { const u = { ...infoFields, [k]: e.target.value }; setInfoFields(u); storage.set('analyze_info', u) }}
                       style={{ width: '100%', padding: '8px 10px', border: `1px solid ${C.border}`, borderRadius: 8, fontSize: '0.85rem', color: C.text, outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', background: '#FFF' }} />
                   </label>
                 ))}
@@ -193,7 +182,7 @@ export default function ResultPage() {
 
         {isEditing && (
           <div style={{ marginBottom: mobile ? 16 : 24, display: 'flex', gap: 10 }}>
-            <Btn variant="primary" onClick={() => { setIsEditing(false); localStorage.setItem('lw_appeal_text', editedText) }} style={{ flex: 2 }}>保存</Btn>
+            <Btn variant="primary" onClick={() => { setIsEditing(false); storage.set('appeal_text', editedText) }} style={{ flex: 2 }}>保存</Btn>
             <Btn variant="secondary" onClick={() => setIsEditing(false)}>取消</Btn>
           </div>
         )}

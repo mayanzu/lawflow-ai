@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { C, Nav, Card, Spinner, Btn, Icons } from '@/ui'
+import { storage } from '@/lib/storage'
 
 interface HistoryItem {
   id: string; fileName: string; uploadTime: string;
@@ -9,6 +10,19 @@ interface HistoryItem {
   判决法院: string; 判决日期: string;
   analyzeInfo?: Record<string, string>; appealText?: string;
   generatedDocuments?: Record<string, { content: string; generatedAt: string; legalBasis?: string[] }>;
+}
+
+async function callHistoryApi(action: string, body: any = {}) {
+  try {
+    const res = await fetch('/api/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, ...body }),
+    })
+    return res.json()
+  } catch {
+    return null
+  }
 }
 
 export default function HistoryPage() {
@@ -24,40 +38,25 @@ export default function HistoryPage() {
     return () => window.removeEventListener('resize', check)
   }, [])
 
-  async function callApi(endpoint: string, body: any) {
-    try {
-      const res = await fetch('http://163.7.1.176:3457' + endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-      })
-      return res.json()
-    } catch { return null }
-  }
-
   async function loadHistory() {
-    const docTypes = ['appeal','complaint','defense','representation','execution','preservation']
-    const res = await callApi('/get-history', {})
+    const res = await callHistoryApi('get')
     const backendHistory = (res?.success ? res.history : []) as HistoryItem[]
 
-    // Merge legacy localStorage data with backend
-    const localRaw = localStorage.getItem('lw_history')
-    if (localRaw) {
-      try {
-        const localData = JSON.parse(localRaw || '[]')
-        const mergedMap = new Map<string, HistoryItem>()
-        // Backend first
-        for (const h of backendHistory) mergedMap.set(h.id, h)
-        // Local fallback
-        for (const h of localData) {
-          if (!mergedMap.has(h.id)) mergedMap.set(h.id, {
-            ...h,
-            generatedDocuments: h.appealText ? {
-              appeal: { content: h.appealText, generatedAt: h.uploadTime || new Date().toISOString() }
-            } : undefined,
-          })
-        }
-        setHistory(Array.from(mergedMap.values()).sort((a, b) => (b.uploadTime || '').localeCompare(a.uploadTime || '')))
-        return
-      } catch {}
+    const localData = storage.get<HistoryItem[]>('history', [])
+    if (localData && localData.length > 0) {
+      const mergedMap = new Map<string, HistoryItem>()
+      for (const h of backendHistory) mergedMap.set(h.id, h)
+      for (const h of localData) {
+        if (!mergedMap.has(h.id)) mergedMap.set(h.id, {
+          ...h,
+          generatedDocuments: h.appealText ? {
+            appeal: { content: h.appealText, generatedAt: h.uploadTime || new Date().toISOString() }
+          } : undefined,
+        })
+      }
+      setHistory(Array.from(mergedMap.values()).sort((a, b) => (b.uploadTime || '').localeCompare(a.uploadTime || '')))
+      setIsLoading(false)
+      return
     }
 
     setHistory(backendHistory)
@@ -68,12 +67,13 @@ export default function HistoryPage() {
 
   function handleDelete(id: string) {
     setHistory(h => h.filter(x => x.id !== id))
-    callApi('/delete-history', { file_id: id })
+    callHistoryApi('delete', { file_id: id })
   }
 
   function handleClearAll() {
-    setHistory([]); localStorage.removeItem('lw_history')
-    callApi('/clear-history', {})
+    setHistory([])
+    storage.remove('history')
+    callHistoryApi('clear')
   }
 
   const DOC_TYPES = [
@@ -86,12 +86,15 @@ export default function HistoryPage() {
   ]
 
   function navigateToDoc(item: HistoryItem, docType: string) {
-    localStorage.setItem('lw_file_id', item.id); localStorage.setItem('lw_file_name', item.fileName); localStorage.setItem('lw_doc_type', docType)
-    if (item.analyzeInfo) localStorage.setItem('lw_analyze_info', JSON.stringify(item.analyzeInfo))
+    storage.set('file_id', item.id)
+    storage.set('file_name', item.fileName)
+    storage.set('doc_type', docType)
+    if (item.analyzeInfo) storage.set('analyze_info', item.analyzeInfo)
     const doc = item.generatedDocuments?.[docType]
-    if (doc?.content) localStorage.setItem('lw_appeal_text', doc.content)
-    else localStorage.removeItem('lw_appeal_text')
-    localStorage.setItem('lw_ocr_text', ''); router.push('/result')
+    if (doc?.content) storage.set('appeal_text', doc.content)
+    else storage.remove('appeal_text')
+    storage.set('ocr_text', '')
+    router.push('/result')
   }
 
   function formatDate(d: string): string {

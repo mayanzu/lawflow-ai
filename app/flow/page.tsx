@@ -2,15 +2,10 @@
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { C, Nav, Card, Spinner, Btn, Icons } from '@/ui'
+import { storage } from '@/lib/storage'
+import { DOC_TYPES as DOC_TYPES_CONFIG, type CaseInfo } from '@/lib/types'
 
-const DOC_TYPES = [
-  { key: 'appeal',         name: '民事上诉状', desc: '不服一审判决',     icon: 'doc' },
-  { key: 'complaint',      name: '民事起诉状', desc: '新案立案',         icon: 'fileText' },
-  { key: 'defense',        name: '民事答辩状', desc: '被诉后答辩',       icon: 'shield' },
-  { key: 'representation', name: '代理词',     desc: '庭审总结',         icon: 'scale' },
-  { key: 'execution',      name: '执行申请书', desc: '申请强制执行',     icon: 'clock' },
-  { key: 'preservation',   name: '保全申请书', desc: '诉讼中保全',       icon: 'lock' },
-]
+const DOC_TYPES = DOC_TYPES_CONFIG
 
 const STEPS = [
   { id: 'ocr',     title: 'OCR 识别', icon: 'search' },
@@ -38,7 +33,7 @@ function FlowContent() {
   const [ocrText, setOcrText] = useState('')
   const [ocrExpanded, setOcrExpanded] = useState(false)
   const [fileName, setFileName] = useState('')
-  const [analyzeInfo, setAnalyzeInfo] = useState<any>(null)
+  const [analyzeInfo, setAnalyzeInfo] = useState<CaseInfo | null>(null)
   const [infoFields, setInfoFields] = useState<Record<string, string>>({})
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null)
 
@@ -80,7 +75,8 @@ function FlowContent() {
       const ocrRes = await callApi('/api/ocr', { file_id: fileIdRef.current })
       if (!ocrRes.success) throw new Error(ocrRes.error || 'OCR 识别失败')
       text = ocrRes.text || ''
-      setOcrText(text); localStorage.setItem('lw_ocr_text', text)
+      setOcrText(text)
+      storage.set('ocr_text', text)
       setStepDone(0, `已识别 ${text.length.toLocaleString()} 字`)
     } catch (e: any) { setStepError(0, e.message); setError(`OCR 识别失败: ${e.message}`); return }
 
@@ -93,7 +89,7 @@ function FlowContent() {
           const m = String(fields.判决日期).match(/(\d{4})年(\d{1,2})月(\d{1,2})日/)
           if (m) fields.判决日期 = `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`
         }
-        localStorage.setItem('lw_analyze_info', JSON.stringify(fields))
+        storage.set('analyze_info', fields)
         setAnalyzeInfo(fields); setInfoFields(fields)
         setStepDone(1, `已提取 ${Object.values(fields).filter(Boolean).length} 个字段`)
       } else { setStepDone(1, '提取完成，请手动填写') }
@@ -104,16 +100,16 @@ function FlowContent() {
   function handleSelectDoc(docType: string) {
     setSelectedDoc(docType)
     setStepDone(2, `已选择 ${DOC_TYPES.find(d => d.key === docType)?.name}`)
-    localStorage.setItem('lw_doc_type', docType)
-    localStorage.removeItem('lw_appeal_text')
-    localStorage.removeItem('lw_legal_basis')
-    localStorage.setItem('lw_analyze_info', JSON.stringify(infoFields))
+    storage.set('doc_type', docType)
+    storage.remove('appeal_text')
+    storage.remove('legal_basis')
+    storage.set('analyze_info', infoFields)
     router.push('/result')
   }
 
   useEffect(() => {
-    const fid = localStorage.getItem('lw_file_id') || ''
-    const fname = localStorage.getItem('lw_file_name') || search.get('file') || ''
+    const fid = storage.get<string>('file_id', '')
+    const fname = storage.get<string>('file_name', '') || search.get('file') || ''
     fileIdRef.current = fid; setFileName(fname)
     if (!fid) { router.push('/'); return }
     setTimeout(() => processFile(), 300)
@@ -127,7 +123,7 @@ function FlowContent() {
     <div style={{ minHeight: '100vh', background: C.bg }}>
       <Nav
         title={fileName}
-        left={<button onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_') || k === 'wf_started').forEach(k => localStorage.removeItem(k)); router.push('/') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.blue, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.9rem', fontWeight: 500 }}>{Icons.arrowLeft(16, C.blue)} 返回</button>}
+        left={<button onClick={() => { storage.clear(); router.push('/') }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C.blue, display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.9rem', fontWeight: 500 }}>{Icons.arrowLeft(16, C.blue)} 返回</button>}
       />
 
       <main style={{ maxWidth: 800, margin: '0 auto', padding: `${mobile ? 16 : 40}px ${pad}px 80px` }}>
@@ -176,7 +172,7 @@ function FlowContent() {
             <div style={{ color: C.red, fontSize: '0.9rem', fontWeight: 500, marginBottom: 14 }}>{error}</div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
               <Btn variant="primary" onClick={() => { processRef.current = false; setError(''); setCurrentStep(0); setStepStatus(['active', 'pending', 'pending']); setStepMessages(['请稍候...']); processFile() }}>重试</Btn>
-              <Btn variant="secondary" onClick={() => { Object.keys(localStorage).filter(k => k.startsWith('lw_')).forEach(k => localStorage.removeItem(k)); router.push('/') }}>重新上传</Btn>
+              <Btn variant="secondary" onClick={() => { storage.clear(); router.push('/') }}>重新上传</Btn>
             </div>
           </Card>
         )}
@@ -197,7 +193,7 @@ function FlowContent() {
                       {k} {!isValid && <span style={{ fontSize: '0.6rem', background: '#FFF3E0', color: '#E65100', padding: '1px 5px', borderRadius: 4 }}>待补充</span>}
                     </div>
                     <input type={k === '判决日期' ? 'date' : 'text'} value={v}
-                      onChange={e => { const u = { ...infoFields, [k]: e.target.value }; setInfoFields(u); localStorage.setItem('lw_analyze_info', JSON.stringify(u)) }}
+                      onChange={e => { const u = { ...infoFields, [k]: e.target.value }; setInfoFields(u); storage.set('analyze_info', u) }}
                       style={{ width: '100%', padding: '9px 11px', border: `1px solid ${isValid ? C.border : '#FF9800'}`, borderRadius: 10, fontSize: '0.85rem', color: isValid ? C.text : '#E65100', background: '#FFF', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', transition: 'border-color 0.2s' }} />
                   </label>
                 )
@@ -207,7 +203,7 @@ function FlowContent() {
               <label>
                 <div style={{ fontSize: '0.7rem', fontWeight: 600, color: C.muted, letterSpacing: '0.04em', marginBottom: 6 }}>判决结果</div>
                 <textarea value={infoFields.判决结果 || ''}
-                  onChange={e => { const u = { ...infoFields, 判决结果: e.target.value }; setInfoFields(u); localStorage.setItem('lw_analyze_info', JSON.stringify(u)) }}
+                  onChange={e => { const u = { ...infoFields, 判决结果: e.target.value }; setInfoFields(u); storage.set('analyze_info', u) }}
                   rows={2} style={{ width: '100%', padding: '9px 11px', border: `1px solid ${C.border}`, borderRadius: 10, fontSize: '0.85rem', color: C.text, background: '#FFF', outline: 'none', fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }} />
               </label>
             </div>
