@@ -14,3 +14,7 @@ scripts/
 
 # Next.js build output
 .next/
+
+# Runtime data
+data/
+
