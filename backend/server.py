@@ -931,8 +931,10 @@ class Handler(ThreadedHandler):
     def _generate_doc_stream(self, body):
         import re, threading
         doc_type = body.get("doc_type", "appeal")
+        print(f"[_generate_doc_stream] received doc_type={doc_type!r}, body_keys={list(body.keys())}", flush=True)
         if doc_type not in DOC_TYPES:
             doc_type = "appeal"
+            print(f"[_generate_doc_stream] doc_type invalid, defaulting to appeal", flush=True)
         info = body.get("info", {})
         ocr_text = body.get("ocr_text", "")
         system, user = _build_prompt(doc_type, info, ocr_text)

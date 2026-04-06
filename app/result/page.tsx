@@ -64,7 +64,7 @@ export default function ResultPage() {
     try {
       const ocrText = localStorage.getItem('lw_ocr_text') || ''
       const info = JSON.parse(localStorage.getItem('lw_analyze_info') || '{}')
-      const res = await fetch('/api/generate-appeal-stream', {
+      const res = await fetch('/api/generate-doc-stream', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ info, ocr_text: ocrText, doc_type: type }),
       })
