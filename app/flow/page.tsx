@@ -112,6 +112,8 @@ function FlowContent() {
     setSelectedDoc(docType)
     setStepDone(2, `已选择 ${DOC_TYPES.find(d => d.key === docType)?.name}`)
     localStorage.setItem('lw_doc_type', docType)
+    localStorage.removeItem('lw_appeal_text')
+    localStorage.removeItem('lw_legal_basis')
     localStorage.setItem('lw_analyze_info', JSON.stringify(infoFields))
     router.push('/result')
   }

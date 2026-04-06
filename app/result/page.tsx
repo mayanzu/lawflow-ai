@@ -46,13 +46,8 @@ export default function ResultPage() {
     const savedDoc = localStorage.getItem('lw_doc_type')
     if (savedDoc) setDocType(savedDoc)
 
-    // If result already exists, show it; otherwise start streaming
-    const existing = localStorage.getItem('lw_appeal_text')
-    if (existing) {
-      setEditedText(existing)
-      setStreamingText(existing)
-      setStreamDone(true)
-    } else if (raw) {
+    // Always regenerate for the selected doc type to avoid stale content from other types
+    if (raw) {
       startStreaming(savedDoc || 'appeal')
     }
   // eslint-disable-next-line
